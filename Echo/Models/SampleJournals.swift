@@ -140,6 +140,137 @@ struct SampleJournals {
             睡前写日记，记录这美好的一天。感恩！
             """,
             date: Calendar.current.date(byAdding: .day, value: -9, to: Date())!
+        ),
+        
+        // 11. 反复出现的咖啡习惯 + 人物
+        SampleEntry(
+            id: UUID(),
+            title: "和小李的下午",
+            content: """
+            今天下午和小李去了那家新开的咖啡馆，点了一杯拿铁。
+            我真的好喜欢喝咖啡，每天至少一杯。
+            小李最近在准备考研，聊了很多他的学习计划。
+            回来的路上买了一本新的心理学书籍，准备晚上翻翻。
+            """,
+            date: Calendar.current.date(byAdding: .day, value: -10, to: Date())!
+        ),
+        
+        // 12. 失眠 + 焦虑
+        SampleEntry(
+            id: UUID(),
+            title: "又失眠了",
+            content: """
+            昨晚又失眠到凌晨2点，翻来覆去睡不着。
+            脑子里一直在想下周的答辩，紧张得不行。
+            今天上课完全没精神，中午趴在桌上睡了一觉才好一点。
+            晚上喝了杯热牛奶，希望今晚能早点入睡。
+            """,
+            date: Calendar.current.date(byAdding: .day, value: -11, to: Date())!
+        ),
+        
+        // 13. 跑步习惯加强
+        SampleEntry(
+            id: UUID(),
+            title: "跑步新记录",
+            content: """
+            今天跑步跑了5公里，破了自己的记录！太开心了！
+            坚持每天跑步已经快两周了，感觉体力明显好了很多。
+            跑完去吃了一碗牛肉面犒劳自己。
+            妈妈打电话过来关心我，叮嘱我注意身体不要太拼。
+            """,
+            date: Calendar.current.date(byAdding: .day, value: -12, to: Date())!
+        ),
+        
+        // 14. 社交压力
+        SampleEntry(
+            id: UUID(),
+            title: "社交恐惧发作",
+            content: """
+            今天参加了一个不太熟的聚会，全程都很紧张。
+            不知道该说什么，感觉自己格格不入。
+            回来之后一个人宅在宿舍看了两集综艺才放松下来。
+            我真的不擅长社交啊，有点担心以后工作面试怎么办。
+            """,
+            date: Calendar.current.date(byAdding: .day, value: -13, to: Date())!
+        ),
+        
+        // 15. 妈妈 + 温暖
+        SampleEntry(
+            id: UUID(),
+            title: "收到妈妈的包裹",
+            content: """
+            今天收到妈妈寄来的包裹，里面有我最爱吃的自制饼干和一封手写信。
+            看完信有点想哭，妈妈说让我好好吃饭别老点外卖。
+            晚上自己做了一顿简单的晚餐，番茄炒蛋和米饭。
+            吃着妈妈做的饼干，觉得好幸福。
+            """,
+            date: Calendar.current.date(byAdding: .day, value: -14, to: Date())!
+        ),
+        
+        // 16. 编程学习 + 咖啡
+        SampleEntry(
+            id: UUID(),
+            title: "码了一天代码",
+            content: """
+            今天写了一整天代码，实现了一个很复杂的功能，成就感满满。
+            中间休息的时候冲了一杯手冲咖啡，好喝到飞起。
+            每天学习编程这个习惯真的给我带来了很大的成长。
+            小王给我推荐了一个新的开源框架，明天研究一下。
+            """,
+            date: Calendar.current.date(byAdding: .day, value: -15, to: Date())!
+        ),
+        
+        // 17. 期中考试压力
+        SampleEntry(
+            id: UUID(),
+            title: "压力好大",
+            content: """
+            还有一周就期中考试了，感觉好多东西都没复习完。
+            今天在图书馆待了8个小时，但效率并不高。
+            焦虑让我根本静不下心来，看着书发呆。
+            和小李互相鼓励了一下，约好明天一起图书馆学习。
+            """,
+            date: Calendar.current.date(byAdding: .day, value: -16, to: Date())!
+        ),
+        
+        // 18. 运动 + 好心情
+        SampleEntry(
+            id: UUID(),
+            title: "打了一场篮球",
+            content: """
+            下午和同学打了两个小时篮球，太爽了！
+            运动真的是最好的解压方式，打完球感觉所有烦恼都消失了。
+            晚上和室友一起吃了火锅，边吃边聊，一晚上都在笑。
+            快乐就是这么简单呀！
+            """,
+            date: Calendar.current.date(byAdding: .day, value: -17, to: Date())!
+        ),
+        
+        // 19. 阅读 + 反思
+        SampleEntry(
+            id: UUID(),
+            title: "读《被讨厌的勇气》",
+            content: """
+            今天开始读《被讨厌的勇气》，第一章就被击中了。
+            \"一切烦恼都来自人际关系\"，这句话让我想了很久。
+            每天阅读的习惯让我看到了很多不同的视角。
+            希望自己能慢慢学会不那么在意别人的眼光。
+            """,
+            date: Calendar.current.date(byAdding: .day, value: -18, to: Date())!
+        ),
+        
+        // 20. 里程碑
+        SampleEntry(
+            id: UUID(),
+            title: "拿到了实习offer！",
+            content: """
+            天哪天哪天哪！！！我拿到了xx公司的暑期实习offer！！！
+            面了三轮终于通过了，打电话告诉妈妈的时候她比我还激动。
+            小李和小王都发来祝贺，今晚一起出去庆祝。
+            这段时间的努力终于有了回报，我要哭了😭
+            感谢每一天的坚持，编程、阅读、跑步，都让我成为更好的自己。
+            """,
+            date: Calendar.current.date(byAdding: .day, value: -19, to: Date())!
         )
     ]
 }

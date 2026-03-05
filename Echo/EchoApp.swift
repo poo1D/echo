@@ -7,11 +7,12 @@ struct EchoApp: App {
         WindowGroup {
             ContentView()
         }
-        .modelContainer(for: [JournalEntry.self, AIInsight.self, Tag.self, MediaAttachment.self])
+        .modelContainer(for: [JournalEntry.self, AIInsight.self, Tag.self, MediaAttachment.self, UserProfile.self, FactMemory.self, JournalEmbedding.self])
     }
 }
 
 #Preview {
     ContentView()
-        .modelContainer(for: [JournalEntry.self, AIInsight.self, Tag.self, MediaAttachment.self])
+        .modelContainer(for: [JournalEntry.self, AIInsight.self, Tag.self, MediaAttachment.self, UserProfile.self, FactMemory.self, JournalEmbedding.self])
 }
+

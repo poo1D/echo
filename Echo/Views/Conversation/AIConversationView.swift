@@ -1,8 +1,10 @@
 import SwiftUI
+import SwiftData
 
 /// AI对话视图 - 动态气泡 + 情绪色彩
 struct AIConversationView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
     @State private var conversationService = AIConversationService()
     @State private var inputText = ""
     @FocusState private var isInputFocused: Bool
@@ -32,8 +34,8 @@ struct AIConversationView: View {
                 }
             }
             .task {
-                // 开始对话
-                await conversationService.startConversation(with: initialContent)
+                // 开始对话（带记忆增强）
+                await conversationService.startConversation(with: initialContent, modelContext: modelContext)
             }
         }
     }
@@ -95,7 +97,7 @@ struct AIConversationView: View {
         let message = inputText
         inputText = ""
         Task {
-            await conversationService.sendMessage(message)
+            await conversationService.sendMessage(message, modelContext: modelContext)
         }
     }
 }

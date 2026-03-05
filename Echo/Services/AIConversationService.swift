@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 /// AI对话服务 - 集成 ModelScope Kimi-K2.5 API
 @Observable @MainActor
@@ -8,6 +9,12 @@ final class AIConversationService {
     var isStreaming = false
     var currentStreamingText = ""
     var errorMessage: String?
+    
+    // 记忆系统
+    private let memoryManager = MemoryManager.shared
+    private var augmentedSystemPrompt: String?
+    private var userMessageCount = 0           // 追踪用户消息数，用于每 3 条刷新记忆
+    private var injectedFactIDs: Set<UUID> = [] // 已注入的事实 ID，避免重复
     
     // ModelScope API 配置（从 APIConfig 读取）
     private let apiEndpoint = APIConfig.apiEndpoint
@@ -36,19 +43,27 @@ final class AIConversationService {
     }
     
     // MARK: - System Prompt
-    private let systemPrompt = """
-    你是一个温暖、善解人意的情绪陪伴助手。你的任务是：
-    1. 认真倾听用户的日记内容
-    2. 识别其中的情绪线索
-    3. 用温和的追问帮助用户深入反思
-    4. 给予适当的情感支持和建议
+    private let baseSystemPrompt = """
+    你是 Echo，一个温暖的日记伙伴。用户正在通过和你对话来写今天的日记。
+    
+    你的任务：
+    1. 用温柔的追问帮用户展开今天的经历和感受
+    2. 识别情绪线索，引导用户表达更多细节
+    3. 适时总结和共情，让用户感到被理解
     
     风格要求：
-    - 语气温柔、不说教
-    - 提问要具体，避免空泛
-    - 每次回复控制在2-3句话
-    - 适时使用emoji增加亲和力
+    - 每次回复只说 1-2 句话，像朋友聊天一样自然
+    - 提问要具体，不要空泛（比如"什么事让你累？"而不是"今天怎么样？"）
+    - 适时使用 emoji 增加亲和力
+    - 不说教、不给建议，除非用户主动问
+    - 如果用户只说了一句话，温柔地追问细节
     """
+
+    
+    /// 获取当前使用的 system prompt（优先使用记忆增强版本）
+    private var systemPrompt: String {
+        augmentedSystemPrompt ?? baseSystemPrompt
+    }
     
     // MARK: - Public Methods
     
@@ -56,6 +71,60 @@ final class AIConversationService {
         let userMessage = ConversationMessage(
             role: .user,
             content: journalContent,
+            timestamp: Date()
+        )
+        messages.append(userMessage)
+        await generateResponse()
+    }
+    
+    /// 带记忆增强的对话启动 — 会检索相关记忆注入 system prompt
+    func startConversation(with journalContent: String, modelContext: ModelContext) async {
+        // 检索记忆上下文
+        let memoryContext = await memoryManager.retrieveContext(
+            for: journalContent,
+            modelContext: modelContext
+        )
+        
+        // 构建增强 prompt
+        augmentedSystemPrompt = memoryManager.buildAugmentedSystemPrompt(
+            context: memoryContext,
+            basePrompt: baseSystemPrompt
+        )
+        
+        print("🧠 [AIConversation] 记忆增强已注入，事实数: \(memoryContext.relevantFacts.count)，相关日记数: \(memoryContext.relevantEntries.count)")
+        
+        let userMessage = ConversationMessage(
+            role: .user,
+            content: journalContent,
+            timestamp: Date()
+        )
+        messages.append(userMessage)
+        await generateResponse()
+    }
+    
+    /// 带记忆增强的发送消息 — 每 3 条用户消息做一次完整记忆检索
+    func sendMessage(_ content: String, modelContext: ModelContext) async {
+        userMessageCount += 1
+        
+        // 每 3 条用户消息刷新一次记忆上下文（平衡性能和准确性）
+        if userMessageCount % 3 == 0 {
+            let memoryContext = await memoryManager.retrieveContext(
+                for: content,
+                modelContext: modelContext
+            )
+            augmentedSystemPrompt = memoryManager.buildAugmentedSystemPrompt(
+                context: memoryContext,
+                basePrompt: baseSystemPrompt
+            )
+            
+            // 更新已注入事实集合
+            injectedFactIDs = Set(memoryContext.relevantFacts.map { $0.id })
+            print("🧠 [AIConversation] 第 \(userMessageCount) 条消息，刷新记忆上下文")
+        }
+        
+        let userMessage = ConversationMessage(
+            role: .user,
+            content: content,
             timestamp: Date()
         )
         messages.append(userMessage)
@@ -76,6 +145,9 @@ final class AIConversationService {
         messages.removeAll()
         currentStreamingText = ""
         isStreaming = false
+        augmentedSystemPrompt = nil
+        userMessageCount = 0
+        injectedFactIDs.removeAll()
     }
     
     // MARK: - API Call

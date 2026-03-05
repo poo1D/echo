@@ -214,6 +214,9 @@ struct JournalEditorView: View {
         
         // 异步处理 AI 提取和奖励
         Task {
+            // 0. 记忆系统：生成 embedding + 提取事实 + 更新用户档案
+            await MemoryManager.shared.processJournalEntry(entry, modelContext: modelContext)
+            
             // 1. AI 提取日程和习惯
             await AIScheduleHabitService.shared.processJournalEntry(fullContent, entryId: entry.id)
             
