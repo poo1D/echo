@@ -1,61 +1,46 @@
-//
-//  ContentView.swift
-//  EchoPKM
-//
-//  Created by Siegfried on 2026/3/7.
-//
-
 import SwiftUI
 import SwiftData
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @State private var selectedTab = 0
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
+        Group {
+            if #available(iOS 26, *) {
+                TabView(selection: $selectedTab) {
+                    Tab("Echo", systemImage: "house.fill", value: 0) {
+                        HomeView()
+                    }
+                    Tab("Diary", systemImage: "book.closed", value: 1) {
+                        DiaryView()
+                    }
+                    Tab("Review", systemImage: "chart.bar.fill", value: 2) {
+                        ReviewView()
                     }
                 }
-                .onDelete(perform: deleteItems)
-            }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
+                .tabViewStyle(.sidebarAdaptable)
+            } else {
+                TabView(selection: $selectedTab) {
+                    HomeView()
+                        .tabItem { Label("Echo", systemImage: "house.fill") }
+                        .tag(0)
+                    DiaryView()
+                        .tabItem { Label("Diary", systemImage: "book.closed") }
+                        .tag(1)
+                    ReviewView()
+                        .tabItem { Label("Review", systemImage: "chart.bar.fill") }
+                        .tag(2)
                 }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
             }
-        } detail: {
-            Text("Select an item")
         }
-    }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
-            }
+        .task {
+            SampleDataService.seedIfNeeded(modelContext: modelContext)
         }
     }
 }
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+        .modelContainer(for: [DiaryEntry.self, WeeklyReview.self, ScheduleItem.self, HabitEntry.self], inMemory: true)
 }

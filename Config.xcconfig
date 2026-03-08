@@ -1,0 +1,4 @@
+// Configuration settings file format documentation can be found at:
+// https://help.apple.com/xcode/#/dev745c5c974
+
+MODELSCOPE_API_KEY = ms-7d462fc7-327d-43d9-8e40-f77d4914a932
