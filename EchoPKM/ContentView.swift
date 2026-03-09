@@ -2,7 +2,6 @@ import SwiftUI
 import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
     @State private var selectedTab = 0
 
     var body: some View {
@@ -34,9 +33,6 @@ struct ContentView: View {
                 }
                 .tint(Color.claudeAccent)
             }
-        }
-        .task {
-            SampleDataService.seedIfNeeded(modelContext: modelContext)
         }
     }
 }
