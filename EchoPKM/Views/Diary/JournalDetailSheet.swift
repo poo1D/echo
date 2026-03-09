@@ -16,6 +16,11 @@ struct JournalDetailSheet: View {
                         PhotoGridView(photoFileNames: entry.photoFileNames)
                     }
 
+                    // 1b. Video thumbnails
+                    if !entry.videoFileNames.isEmpty {
+                        VideoThumbnailsView(videoFileNames: entry.videoFileNames)
+                    }
+
                     // 2. Audio waveform player
                     if let firstAudio = entry.audioFileNames.first {
                         AudioWaveformPlayer(fileName: firstAudio)
@@ -86,7 +91,7 @@ struct JournalDetailSheet: View {
 
                     // 7. View Conversation link
                     NavigationLink {
-                        ConversationView(entry: entry)
+                        TranscriptReplayView(entry: entry)
                     } label: {
                         HStack {
                             Image(systemName: "bubble.left.and.bubble.right")
@@ -124,9 +129,9 @@ struct JournalDetailSheet: View {
     }
 }
 
-// MARK: - Conversation View
+// MARK: - Transcript Replay View
 
-private struct ConversationView: View {
+private struct TranscriptReplayView: View {
     let entry: DiaryEntry
 
     var body: some View {
@@ -155,6 +160,11 @@ private struct ConversationView: View {
                                         }
                                     }
                                 }
+                            }
+
+                            // Inline videos
+                            if !msg.videoFileNames.isEmpty {
+                                VideoThumbnailsView(videoFileNames: msg.videoFileNames)
                             }
 
                             HStack {

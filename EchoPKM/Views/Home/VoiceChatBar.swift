@@ -1,14 +1,15 @@
 import SwiftUI
 import PhotosUI
 
-/// Voice-first input bar with large mic button, text field, photo picker, and location
+/// Voice-first input bar with large mic button, text field, photo picker, video picker, and location
 struct VoiceChatBar: View {
     @Binding var text: String
     var speechService: SpeechService
     var isStreaming: Bool
     @Bindable var photoPickerService: PhotoPickerService
+    @Bindable var videoPickerService: VideoPickerService
     @Bindable var locationService: LocationService
-    var onSend: (String, [String], PendingLocation?) -> Void
+    var onSend: (String, [String], [String], PendingLocation?) -> Void
 
     @State private var showingTextField = false
     @State private var showingLocationPicker = false
@@ -66,6 +67,62 @@ struct VoiceChatBar: View {
                 }
             }
 
+            // Pending videos preview
+            if !videoPickerService.pendingVideos.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(videoPickerService.pendingVideos) { video in
+                            ZStack(alignment: .topTrailing) {
+                                ZStack(alignment: .bottomTrailing) {
+                                    Image(uiImage: video.thumbnail)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 80, height: 60)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                                    // Play icon overlay
+                                    Image(systemName: "play.circle.fill")
+                                        .font(.system(size: 20))
+                                        .foregroundStyle(.white)
+                                        .shadow(radius: 2)
+                                        .frame(width: 80, height: 60)
+
+                                    // Duration badge
+                                    Text(VideoPickerService.formatDuration(video.duration))
+                                        .font(.system(size: 9, weight: .medium))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 1)
+                                        .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 3))
+                                        .padding(4)
+                                }
+
+                                Button {
+                                    videoPickerService.removePending(id: video.id)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 18))
+                                        .foregroundStyle(.white, .black.opacity(0.6))
+                                }
+                                .offset(x: 4, y: -4)
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+            }
+
+            // Video processing indicator
+            if videoPickerService.isProcessing {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                    Text("Processing video...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             // Text input row
             HStack(spacing: 10) {
                 // Photo picker button
@@ -80,6 +137,20 @@ struct VoiceChatBar: View {
                 }
                 .onChange(of: photoPickerService.selectedItems) { _, _ in
                     Task { await photoPickerService.processSelectedItems() }
+                }
+
+                // Video picker button
+                PhotosPicker(
+                    selection: $videoPickerService.selectedItems,
+                    maxSelectionCount: 1,
+                    matching: .videos
+                ) {
+                    Image(systemName: "video.badge.plus")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.blue)
+                }
+                .onChange(of: videoPickerService.selectedItems) { _, _ in
+                    Task { await videoPickerService.processSelectedItems() }
                 }
 
                 // Location button
@@ -163,7 +234,7 @@ struct VoiceChatBar: View {
     }
 
     private var canSend: Bool {
-        !text.trimmingCharacters(in: .whitespaces).isEmpty || !photoPickerService.pendingImages.isEmpty
+        !text.trimmingCharacters(in: .whitespaces).isEmpty || !photoPickerService.pendingImages.isEmpty || !videoPickerService.pendingVideos.isEmpty
     }
 
     private func toggleRecording() async {
@@ -184,10 +255,11 @@ struct VoiceChatBar: View {
         isTextFieldFocused = false
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         let photoFiles = photoPickerService.consumePendingFileNames()
+        let videoFiles = videoPickerService.consumePendingFileNames()
         let location = locationService.consumePending()
-        guard !trimmed.isEmpty || !photoFiles.isEmpty else { return }
-        let messageText = trimmed.isEmpty ? "[Photo]" : trimmed
-        onSend(messageText, photoFiles, location)
+        guard !trimmed.isEmpty || !photoFiles.isEmpty || !videoFiles.isEmpty else { return }
+        let messageText = trimmed.isEmpty ? (videoFiles.isEmpty ? "[Photo]" : "[Video]") : trimmed
+        onSend(messageText, photoFiles, videoFiles, location)
         text = ""
     }
 }

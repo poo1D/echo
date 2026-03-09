@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import AVFoundation
 
 /// Minimal LLM chat client with SSE streaming — talks to ModelScope Kimi-K2.5
 @Observable @MainActor
@@ -12,17 +13,19 @@ final class ChatService {
         var content: String
         let timestamp: Date
         var photoFileNames: [String]
+        var videoFileNames: [String]
 
         enum Role: String, Codable {
             case user, assistant, system
         }
 
-        init(role: Role, content: String, photoFileNames: [String] = []) {
+        init(role: Role, content: String, photoFileNames: [String] = [], videoFileNames: [String] = []) {
             self.id = UUID()
             self.role = role
             self.content = content
             self.timestamp = Date()
             self.photoFileNames = photoFileNames
+            self.videoFileNames = videoFileNames
         }
     }
 
@@ -210,8 +213,8 @@ final class ChatService {
 
     // MARK: - Send Message (SSE Streaming)
 
-    func send(_ text: String, context recentEntries: [DiaryEntry], allEntries: [DiaryEntry]? = nil, photoFileNames: [String] = [], location: PendingLocation? = nil) async {
-        let userMessage = Message(role: .user, content: text, photoFileNames: photoFileNames)
+    func send(_ text: String, context recentEntries: [DiaryEntry], allEntries: [DiaryEntry]? = nil, photoFileNames: [String] = [], videoFileNames: [String] = [], location: PendingLocation? = nil) async {
+        let userMessage = Message(role: .user, content: text, photoFileNames: photoFileNames, videoFileNames: videoFileNames)
         messages.append(userMessage)
 
         isStreaming = true
@@ -244,7 +247,7 @@ final class ChatService {
                     textContent += "\n[User's current location: \(loc.name)]"
                 }
 
-                if !msg.photoFileNames.isEmpty {
+                if !msg.photoFileNames.isEmpty || !msg.videoFileNames.isEmpty {
                     // Build multimodal content array with image_url blocks + text
                     var contentParts: [[String: Any]] = []
                     for fileName in msg.photoFileNames {
@@ -253,6 +256,18 @@ final class ChatService {
                                 "type": "image_url",
                                 "image_url": ["url": "data:image/jpeg;base64,\(base64)"]
                             ])
+                        }
+                    }
+                    for fileName in msg.videoFileNames {
+                        let frames = loadVideoFramesAsBase64(fileName)
+                        for frameBase64 in frames {
+                            contentParts.append([
+                                "type": "image_url",
+                                "image_url": ["url": "data:image/jpeg;base64,\(frameBase64)"]
+                            ])
+                        }
+                        if !frames.isEmpty {
+                            contentParts.append(["type": "text", "text": "[User shared a video]"])
                         }
                     }
                     contentParts.append(["type": "text", "text": textContent])
@@ -383,7 +398,7 @@ final class ChatService {
 
     // MARK: - Photo Base64 Encoding
 
-    private func loadPhotoAsBase64(_ fileName: String) -> String? {
+    func loadPhotoAsBase64(_ fileName: String) -> String? {
         let url = PhotoPickerService.photoURL(for: fileName)
         guard let data = try? Data(contentsOf: url),
               let image = UIImage(data: data) else { return nil }
@@ -406,6 +421,155 @@ final class ChatService {
 
         guard let jpegData = resized.jpegData(compressionQuality: 0.7) else { return nil }
         return jpegData.base64EncodedString()
+    }
+
+    // MARK: - Video Frame Extraction
+
+    func loadVideoFramesAsBase64(_ fileName: String, frameCount: Int = 4) -> [String] {
+        let url = VideoPickerService.videoURL(for: fileName)
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 512, height: 512)
+
+        let duration = asset.duration
+        let durationSeconds = CMTimeGetSeconds(duration)
+        guard durationSeconds > 0 else { return [] }
+
+        let interval = durationSeconds / Double(frameCount + 1)
+        var frames: [String] = []
+
+        for i in 1...frameCount {
+            let time = CMTimeMakeWithSeconds(interval * Double(i), preferredTimescale: 600)
+            guard let cgImage = try? generator.copyCGImage(at: time, actualTime: nil) else { continue }
+            let uiImage = UIImage(cgImage: cgImage)
+            guard let jpegData = uiImage.jpegData(compressionQuality: 0.6) else { continue }
+            frames.append(jpegData.base64EncodedString())
+        }
+
+        return frames
+    }
+
+    // MARK: - Agent API (for MultiAgentPipeline)
+
+    /// Non-streaming LLM call — used by parallel Agents (Emotion, Memory, Action)
+    /// Retries up to 5 times on HTTP 429 (rate limit) with exponential backoff.
+    func callAgent(systemPrompt: String, userContent: String) async throws -> String {
+        guard !apiKey.isEmpty else { throw AgentError.noAPIKey }
+
+        let body: [String: Any] = [
+            "model": modelId,
+            "messages": [
+                ["role": "system", "content": systemPrompt],
+                ["role": "user", "content": userContent]
+            ],
+            "stream": false
+        ]
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+
+        var lastError: Error = AgentError.httpError(429)
+        for attempt in 0..<5 {
+            if attempt > 0 {
+                // Exponential backoff: 2s, 4s, 8s, 16s
+                let delay = UInt64(1 << attempt) * 1_000_000_000
+                print("callAgent: retrying in \(1 << attempt)s (attempt \(attempt + 1)/5)")
+                try? await Task.sleep(nanoseconds: delay)
+            }
+
+            var request = URLRequest(url: URL(string: apiEndpoint)!)
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = bodyData
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+
+            if code == 429 {
+                print("callAgent: 429 rate limited, attempt \(attempt + 1)/5")
+                lastError = AgentError.httpError(429)
+                continue
+            }
+
+            guard code == 200 else {
+                throw AgentError.httpError(code)
+            }
+
+            guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let choices = obj["choices"] as? [[String: Any]],
+                  let message = choices.first?["message"] as? [String: Any],
+                  let content = message["content"] as? String else {
+                throw AgentError.parseError
+            }
+
+            return content
+        }
+
+        throw lastError
+    }
+
+    /// Streaming LLM call — used by Synthesis Agent
+    func streamAgent(
+        systemPrompt: String,
+        messages: [[String: Any]],
+        onDelta: @escaping (String) -> Void
+    ) async throws -> String {
+        guard !apiKey.isEmpty else { throw AgentError.noAPIKey }
+
+        var request = URLRequest(url: URL(string: apiEndpoint)!)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        var apiMessages: [[String: Any]] = [
+            ["role": "system", "content": systemPrompt]
+        ]
+        apiMessages.append(contentsOf: messages)
+
+        let body: [String: Any] = [
+            "model": modelId,
+            "messages": apiMessages,
+            "stream": true
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+            throw AgentError.httpError(code)
+        }
+
+        var fullContent = ""
+        for try await line in bytes.lines {
+            guard line.hasPrefix("data: ") else { continue }
+            let json = String(line.dropFirst(6))
+            if json == "[DONE]" { break }
+
+            if let data = json.data(using: .utf8),
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let choices = obj["choices"] as? [[String: Any]],
+               let delta = choices.first?["delta"] as? [String: Any],
+               let content = delta["content"] as? String {
+                fullContent += content
+                onDelta(content)
+            }
+        }
+
+        return fullContent
+    }
+
+    enum AgentError: Error, LocalizedError {
+        case noAPIKey
+        case httpError(Int)
+        case parseError
+
+        var errorDescription: String? {
+            switch self {
+            case .noAPIKey: return "API key not configured"
+            case .httpError(let code): return "HTTP error \(code)"
+            case .parseError: return "Failed to parse response"
+            }
+        }
     }
 
     // MARK: - Mock Fallback

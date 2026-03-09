@@ -11,6 +11,7 @@ class DiaryEntry {
     var transcript: Data?
     var audioFileNames: [String]
     var photoFileNames: [String]
+    var videoFileNames: [String]
     var topics: [String]
     var aiInsight: String?
     var locationName: String?
@@ -24,6 +25,7 @@ class DiaryEntry {
         transcript: Data? = nil,
         audioFileNames: [String] = [],
         photoFileNames: [String] = [],
+        videoFileNames: [String] = [],
         topics: [String] = [],
         aiInsight: String? = nil,
         locationName: String? = nil,
@@ -38,6 +40,7 @@ class DiaryEntry {
         self.transcript = transcript
         self.audioFileNames = audioFileNames
         self.photoFileNames = photoFileNames
+        self.videoFileNames = videoFileNames
         self.topics = topics
         self.aiInsight = aiInsight
         self.locationName = locationName
@@ -54,13 +57,15 @@ struct TranscriptMessage: Codable, Identifiable {
     let content: String
     let timestamp: Date
     var photoFileNames: [String]
+    var videoFileNames: [String]
 
-    init(id: UUID, role: String, content: String, timestamp: Date, photoFileNames: [String] = []) {
+    init(id: UUID, role: String, content: String, timestamp: Date, photoFileNames: [String] = [], videoFileNames: [String] = []) {
         self.id = id
         self.role = role
         self.content = content
         self.timestamp = timestamp
         self.photoFileNames = photoFileNames
+        self.videoFileNames = videoFileNames
     }
 
     init(from decoder: Decoder) throws {
@@ -70,6 +75,7 @@ struct TranscriptMessage: Codable, Identifiable {
         content = try container.decode(String.self, forKey: .content)
         timestamp = try container.decode(Date.self, forKey: .timestamp)
         photoFileNames = (try? container.decode([String].self, forKey: .photoFileNames)) ?? []
+        videoFileNames = (try? container.decode([String].self, forKey: .videoFileNames)) ?? []
     }
 }
 
@@ -86,9 +92,40 @@ extension DiaryEntry {
                 role: $0.role.rawValue,
                 content: $0.content,
                 timestamp: $0.timestamp,
-                photoFileNames: $0.photoFileNames
+                photoFileNames: $0.photoFileNames,
+                videoFileNames: $0.videoFileNames
             )
         }
         return try? JSONEncoder().encode(items)
+    }
+
+    /// Encode transcript from FeedItem array (extracts user/assistant messages)
+    static func encodeFromFeed(_ items: [FeedItem]) -> Data? {
+        var messages: [TranscriptMessage] = []
+        for item in items {
+            switch item {
+            case .userMessage(let data):
+                messages.append(TranscriptMessage(
+                    id: data.id,
+                    role: "user",
+                    content: data.content,
+                    timestamp: data.timestamp,
+                    photoFileNames: data.photoFileNames,
+                    videoFileNames: data.videoFileNames
+                ))
+            case .assistantMessage(let data):
+                if !data.textContent.isEmpty {
+                    messages.append(TranscriptMessage(
+                        id: data.id,
+                        role: "assistant",
+                        content: data.textContent,
+                        timestamp: data.timestamp
+                    ))
+                }
+            default:
+                break
+            }
+        }
+        return try? JSONEncoder().encode(messages)
     }
 }

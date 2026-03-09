@@ -143,6 +143,12 @@ struct DiaryView: View {
             try? fileManager.removeItem(at: url)
         }
 
+        // Remove associated video files
+        for fileName in entry.videoFileNames {
+            let url = docs.appendingPathComponent(fileName)
+            try? fileManager.removeItem(at: url)
+        }
+
         // Delete associated ScheduleItems
         let entryID = entry.id
         if let schedules = try? modelContext.fetch(
@@ -166,130 +172,7 @@ struct DiaryView: View {
     }
 }
 
-// MARK: - Week Date Row
-
-private struct WeekDateRow: View {
-    private let calendar = Calendar.current
-    private let today = Date()
-
-    var body: some View {
-        HStack {
-            ForEach(weekDays, id: \.self) { date in
-                VStack(spacing: 4) {
-                    Text(dayLetter(date))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Text("\(calendar.component(.day, from: date))")
-                        .font(.caption.weight(calendar.isDateInToday(date) ? .bold : .regular))
-                        .foregroundStyle(calendar.isDateInToday(date) ? .white : .primary)
-                        .frame(width: 28, height: 28)
-                        .background(
-                            calendar.isDateInToday(date)
-                                ? Color.blue
-                                : Color.clear
-                        )
-                        .clipShape(Circle())
-                }
-                .frame(maxWidth: .infinity)
-            }
-        }
-    }
-
-    private var weekDays: [Date] {
-        let start = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: today))!
-        return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
-    }
-
-    private func dayLetter(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEEEE"
-        return formatter.string(from: date)
-    }
-}
-
-// MARK: - Diary Card (Apple Journal Style)
-
-private struct DiaryCard: View {
-    let entry: DiaryEntry
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // 1. Photo grid
-            if !entry.photoFileNames.isEmpty {
-                PhotoGridView(photoFileNames: entry.photoFileNames)
-            }
-
-            // 2. Audio waveform player
-            if let firstAudio = entry.audioFileNames.first {
-                AudioWaveformPlayer(fileName: firstAudio)
-            }
-
-            // 3. Summary text
-            Text(entry.summary)
-                .font(.body)
-                .foregroundStyle(.primary)
-                .lineLimit(4)
-
-            // 4. Bottom info row: mood + location + time
-            HStack(spacing: 12) {
-                if let emoji = entry.moodEmoji {
-                    Text(emoji)
-                        .font(.title3)
-                }
-
-                if let loc = entry.locationName {
-                    HStack(spacing: 4) {
-                        Image(systemName: "mappin")
-                            .font(.caption2)
-                        Text(loc)
-                            .font(.caption)
-                            .lineLimit(1)
-                    }
-                    .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Text(entry.createdAt.formatted(date: .omitted, time: .shortened))
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-
-            // 5. Topic tags (max 4)
-            if !entry.topics.isEmpty {
-                HStack(spacing: 6) {
-                    ForEach(Array(entry.topics.prefix(4)), id: \.self) { topic in
-                        Text(topic)
-                            .font(.caption2)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(Color.blue.opacity(0.08))
-                            .clipShape(Capsule())
-                            .foregroundStyle(.blue)
-                    }
-                }
-            }
-
-            // 6. AI Insight
-            if let insight = entry.aiInsight {
-                HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
-                        .font(.caption2)
-                        .foregroundStyle(.purple)
-                    Text(insight)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-            }
-        }
-        .padding()
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.06), radius: 8, y: 3)
-        .padding(.horizontal)
-    }
-}
+// DiaryCard and WeekDateRow are now in Views/Shared/
 
 #Preview {
     DiaryView()

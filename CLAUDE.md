@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build & Run
 
-This is a native SwiftUI iOS app built with Xcode (26.2, Swift 6.0). No external package dependencies.
+Native SwiftUI iOS app — Xcode 26.2, Swift 6.0. No external package dependencies (pure Apple frameworks).
 
 ```bash
 # Build
@@ -14,64 +14,125 @@ xcodebuild -project EchoPKM.xcodeproj -scheme EchoPKM -configuration Debug -dest
 xcodebuild -project EchoPKM.xcodeproj -scheme EchoPKM test -destination 'platform=iOS Simulator,name=iPhone 16'
 ```
 
-**Required setup:** Set `MODELSCOPE_API_KEY` in `Config.xcconfig` for LLM functionality.
+**Required setup:** Set `MODELSCOPE_API_KEY` in `Config.xcconfig` for LLM functionality. The key is read from bundle Info.plist (injected via xcconfig) with fallback to environment variable.
 
 ## Architecture
 
-**Layered SwiftUI voice diary app with multimodal input (voice, text, photos, location), an animated pet companion, and AI-powered insights.**
+**Voice diary app with multimodal input (voice, text, photos, videos, location), animated pet companion, multi-agent AI pipeline, and on-device semantic search.**
 
 ```
-Views (SwiftUI)  →  Services (@Observable @MainActor)  →  SwiftData (DiaryEntry, WeeklyReview, ScheduleItem, HabitEntry)
+User Input → VoiceChatBar
+                ↓
+           HomeView.feedItems: [FeedItem]     ← heterogeneous feed stream
+                ↓
+           MultiAgentPipeline.process()
+           ├→ RAGService.search()             ← on-device, instant
+           ├→ EmotionAgent, MemoryAgent, ActionAgent  ← parallel, staggered
+           ├→ executeActions()                ← writes to SwiftData
+           └→ SynthesisAgent                  ← streams response with rich cards
+                ↓
+           AutoSaveService.saveFeedSession()  ← 2min inactivity or background
+           ├→ DiaryEntry (SwiftData)
+           ├→ RAGService.indexEntry()
+           └→ InsightService + ScheduleHabitService (async)
 ```
+
+### Service Pattern
+
+All services follow `@Observable @MainActor final class` for thread-safe reactive state. Services are initialized as `@State` properties in HomeView and passed to child views (no DI framework).
+
+### Multi-Agent Pipeline (`MultiAgentPipeline.swift`)
+
+4-phase orchestration replacing simple chat:
+
+1. **Phase 0 — RAG Retrieval** (on-device, no API): `RAGService` semantic search → top-5 matching entries
+2. **Phase 1 — Three Parallel Analysis Agents** (staggered to avoid 429s):
+   - Emotion Agent (0ms delay) → mood, intensity 1-5, needs
+   - Memory Agent (+1.5s) → RAG-contextual pattern analysis
+   - Action Agent (+3s) → schedule/habit/goal extraction → writes to SwiftData
+3. **Phase 2 — Execute Actions** → persists schedules/habits before response
+4. **Phase 3 — Synthesis Agent** (streaming) → warm response + `<card type="...">JSON</card>` markup for rich cards
+
+The pipeline exposes phase status via `PipelineSnapshot` feed items for real-time UI visualization.
+
+### RAGService (`RAGService.swift`)
+
+On-device semantic search using Apple native frameworks:
+- **NLEmbedding** for word embeddings (512-dim, Chinese + English)
+- **NLTokenizer** for CJK word segmentation
+- **vDSP** for SIMD-accelerated mean pooling + cosine similarity
+- Fallback: character bigram TF-IDF if embedding unavailable
+- Vector index persisted as JSON in Documents directory
+- Similarity threshold: 0.3 minimum
+
+### Feed Architecture
+
+`FeedItem` enum drives the heterogeneous home feed:
+```
+.proactiveCard(ProactiveCardData)    — AI-generated push from local data (no API)
+.userMessage(UserMessageData)        — User input + attachments
+.agentPipeline(PipelineSnapshot)     — Real-time agent status visualization
+.assistantMessage(AssistantMessageData) — LLM response + RichContent cards
+.actionConfirm(ActionConfirmData)    — Executed schedules/habits confirmation
+```
+
+`RichContent` enum (parsed by `ToolCallParser` from `<card>` markup in LLM output):
+- `memoryRecall` — related past entry
+- `moodTrend` — mood trend with mini chart
+- `scheduleConfirm` — extracted event
+- `habitStreak` — habit progress
+- `patternInsight` — discovered behavior pattern
 
 ### Services
 
-All services follow the `@Observable @MainActor final class` pattern for thread-safe reactive state:
+- **ChatService** — SSE streaming via `URLSession.bytes` (Kimi-K2.5). Two modes: `stream()` for streaming, `callAgent()` for full response. Supports multimodal input (photos as Base64 JPEG, videos as ~5 extracted frames).
+- **AutoSaveService** — Converts feed sessions to `DiaryEntry` on 2-minute inactivity or app background. Requires ≥2 user messages. Has both `saveSession()` (legacy chat) and `saveFeedSession()` (feed-based).
+- **ProactiveGreetingService** — Generates proactive cards from local data (no LLM): schedule reminders, habit streak celebrations, low mood care, topic follow-ups. Time-aware greetings.
+- **SpeechService** — `SFSpeechRecognizer` with simultaneous M4A audio recording to Documents.
+- **InsightService** — Per-entry insights (15-word observation) and weekly observations cached in `WeeklyReview`.
+- **ScheduleHabitService** — Extracts events/habits from entries via LLM → `ScheduleItem` and `HabitEntry` SwiftData models.
+- **LocationService** — `CLLocationManager` + `CLGeocoder` reverse geocoding.
+- **PhotoPickerService** — Up to 5 images, JPEG 0.8 quality + 120x120 thumbnails in Documents.
+- **VideoPickerService** — MP4 compression via `AVAssetExportSession` + frame extraction for thumbnails.
+- **SampleDataService** — Seeds sample data on first launch (8 entries, 3 schedules, 9 habits).
 
-- **ChatService** — SSE streaming chat with ModelScope API (Kimi-K2.5). Three-layer context building: (1) recent 7 entries, (2) long-term patterns from 23 older entries, (3) topic-matched relevant entries. Session summarization extracts mood, topics, summary as JSON. System prompt includes schedule/habit awareness.
-- **SpeechService** — Live speech-to-text via `SFSpeechRecognizer` with simultaneous M4A audio recording to Documents directory.
-- **AutoSaveService** — Converts chat sessions to `DiaryEntry` on 2-minute inactivity or app background. Requires ≥2 user messages. Triggers async insight generation and schedule/habit extraction after save.
-- **InsightService** — Generates per-entry insights (15-word warm observation) and weekly observations. Weekly observations are cached in `WeeklyReview` model, invalidated when entry count changes.
-- **ScheduleHabitService** — Extracts scheduled events and recurring habits from diary entries via LLM. Parses JSON response into `ScheduleItem` and `HabitEntry` SwiftData models.
-- **LocationService** — `CLLocationManager` with reverse geocoding via `CLGeocoder`. Returns `PendingLocation` struct (name + coordinates).
-- **PhotoPickerService** — PhotosUI integration (up to 5 images). Stores JPEG (0.8 quality) + thumbnails (120x120) in Documents directory.
-- **SampleDataService** — Seeds 8 sample diary entries, 3 sample schedules, and 9 sample habit records on first launch (checks entry count).
+### Data Models (SwiftData)
 
-### Data Models
+- **DiaryEntry** — summary, mood emoji/score (1-5), transcript (JSON-encoded `[TranscriptMessage]` as `Data` — use `decodedTranscript` computed property), audio/photo/video file names, topics, AI insight, location. Has `encodeFromFeed()` helper for feed-based sessions.
+- **WeeklyReview** — Cached weekly observations with `weekStartDate` + `entryCount` for invalidation.
+- **ScheduleItem** — Events extracted from conversations (title, date, endDate?, isCompleted).
+- **HabitEntry** — Recurring activities (name lowercase-normalized, date, completed).
 
-- **DiaryEntry** (SwiftData `@Model`) — Stores: summary, mood emoji, mood score (1-5), transcript (JSON-encoded `[TranscriptMessage]` as `Data`), audio file names, photo file names, topics, AI insight, location name, latitude/longitude. Use `decodedTranscript` computed property to read transcript.
-- **WeeklyReview** (SwiftData `@Model`) — Caches weekly LLM observations with `weekStartDate` and `entryCount` for invalidation.
-- **ScheduleItem** (SwiftData `@Model`) — Stores: title, date, endDate?, notes?, isCompleted, sourceEntryID?, createdAt. Used for upcoming events extracted from conversations.
-- **HabitEntry** (SwiftData `@Model`) — Stores: name (lowercase normalized), date, completed, sourceEntryID?, createdAt. Used for tracking recurring activities.
-
-All models registered in SwiftData container in `EchoPKMApp.swift`.
+All registered in `EchoPKMApp.swift` via `.modelContainer(for:)`.
 
 ### Views
 
-- **HomeView** — Main chat interface with PetView (140pt), message list with Claude-styled bubbles (warm beige user, near-white AI with sparkle avatar), VoiceChatBar. Auto-saves on 2-minute inactivity timer or scene phase change to background. Keyboard dismisses interactively on scroll.
-- **VoiceChatBar** — Voice-first input: large mic button (64pt), text field (1-4 line expansion) with @FocusState for keyboard dismissal, location picker sheet, photo preview strip, send button. Auto-sends on mic stop if text present.
-- **LocationPickerSheet** — MapKit map with pin at current location, reverse geocoded place name, Add Location / Cancel buttons. Presented as `.sheet` with `.medium` and `.large` detents.
-- **DiaryView** — Timeline grouped by day with week date selector. DiaryCard shows photo grid (1-4 layout with "+N" overflow), audio waveform player, summary, mood, location, topic tags (max 4), AI insight. TranscriptSheet modal for full conversation replay with Claude-styled bubbles.
-- **AudioWaveformPlayer** — Loads M4A from Documents, downsamples to 50 bars, renders waveform via Canvas with played/remaining coloring.
-- **ReviewView** — Weekly analytics: mood bar chart (Charts framework, 5-color gradient), LLM pet observation (async with cache), key moments (top 5 by mood), topic frequency cloud (custom FlowLayout, up to 10 tags), upcoming schedules (next 5 events with completion toggle), habits this week (grouped by name with emoji + count).
-- **PetView** — Procedurally drawn penguin (no image assets). Mood states (happy/neutral/tired/worried) affect cheek opacity. Action animations: wingFlap, shyLookDown, jump, nod. Idle loop: breathing, bouncing, blinking.
+- **HomeView** — Feed-based UI with PetView (140pt), FeedItemView list, VoiceChatBar. Pipeline status visualization.
+- **FeedItemView** — Router: switches on `FeedItem` enum to render 5 item types.
+- **RichContentCards** — 5 card renderers for `RichContent` types.
+- **VoiceChatBar** — Voice-first input: 64pt mic button, 1-4 line text field with @FocusState, location picker, photo/video preview strip.
+- **DiaryView** — Day-grouped timeline with week selector. Cards show photo grid, audio waveform, video thumbnails, summary, mood, topics.
+- **JournalDetailSheet** — Full entry view with video thumbnails and transcript replay.
+- **ReviewView** — Weekly analytics: mood bar chart (Charts), LLM pet observation, key moments, topic cloud (custom FlowLayout), schedules, habits.
+- **PetView** — Procedurally drawn penguin (no assets). Mood states affect appearance. Action animations: wingFlap, shyLookDown, jump, nod. Reacts to pipeline phases.
 
 ### Key Patterns
 
-- Tab navigation with iOS 26 `Tab()` API and pre-iOS 26 `TabView` fallback in ContentView
+- Tab navigation: iOS 26 `Tab()` API with pre-iOS 26 `TabView` fallback in ContentView
 - `@Query` for reactive SwiftData fetches in views
-- SSE streaming via `URLSession.bytes` with line-by-line JSON delta parsing in ChatService
-- Audio and photo files stored by filename in Documents directory, referenced from DiaryEntry arrays
-- `Color(hex:)` extension and Claude color palette (`claudeUserBubble`, `claudeAssistantBubble`, `claudeAccent`) in Helpers/ColorExtension.swift
-- Async/await throughout with proper task cancellation on view disappear
+- Media files stored by filename in Documents directory, referenced from DiaryEntry string arrays
+- `Color(hex:)` extension and Claude color palette (`claudeUserBubble: #F5F0E8`, `claudeAssistantBubble: #FAFAFA`, `claudeAccent: #D97757`) in Helpers/ColorExtension.swift
+- Async/await with proper task cancellation on view disappear
+- Fallback JSON parsing: tries direct decode, then extracts `{...}` substring, then returns empty fallback
+- Staggered parallel API calls to avoid 429 rate limits (fixed delays, not dynamic backoff)
+- Mock fallback responses when API is unavailable
 
 ### API Integration
 
 - Endpoint: `https://api-inference.modelscope.cn/v1/chat/completions`
 - Model: `moonshotai/Kimi-K2.5`
-- API key read from bundle Info.plist (injected from Config.xcconfig) with fallback to `MODELSCOPE_API_KEY` environment variable
-- Streaming (ChatService) and non-streaming (InsightService, ScheduleHabitService) modes
-- Mock fallback responses when API is unavailable
+- API key: `APIConfig.swift` reads from Info.plist (xcconfig injection) → env var fallback
+- All LLM prompts are in Chinese; JSON output format for structured extraction
 
 ## Conventions
 

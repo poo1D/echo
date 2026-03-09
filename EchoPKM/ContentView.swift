@@ -9,29 +9,30 @@ struct ContentView: View {
         Group {
             if #available(iOS 26, *) {
                 TabView(selection: $selectedTab) {
-                    Tab("Echo", systemImage: "house.fill", value: 0) {
-                        HomeView()
+                    Tab("Echo", systemImage: "bird.fill", value: 0) {
+                        UnifiedView()
                     }
-                    Tab("Diary", systemImage: "book.closed", value: 1) {
-                        DiaryView()
-                    }
-                    Tab("Review", systemImage: "chart.bar.fill", value: 2) {
+                    Tab("Review", systemImage: "chart.bar.fill", value: 1) {
                         ReviewView()
                     }
+                    Tab("Profile", systemImage: "person.crop.circle", value: 2) {
+                        ProfileView()
+                    }
                 }
-                .tabViewStyle(.sidebarAdaptable)
+                .tint(Color.claudeAccent)
             } else {
                 TabView(selection: $selectedTab) {
-                    HomeView()
-                        .tabItem { Label("Echo", systemImage: "house.fill") }
+                    UnifiedView()
+                        .tabItem { Label("Echo", systemImage: "bird.fill") }
                         .tag(0)
-                    DiaryView()
-                        .tabItem { Label("Diary", systemImage: "book.closed") }
-                        .tag(1)
                     ReviewView()
                         .tabItem { Label("Review", systemImage: "chart.bar.fill") }
+                        .tag(1)
+                    ProfileView()
+                        .tabItem { Label("Profile", systemImage: "person.crop.circle") }
                         .tag(2)
                 }
+                .tint(Color.claudeAccent)
             }
         }
         .task {

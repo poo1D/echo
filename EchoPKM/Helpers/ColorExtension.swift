@@ -5,6 +5,12 @@ extension Color {
     static let claudeUserBubble = Color(hex: "F5F0E8")       // warm beige
     static let claudeAssistantBubble = Color(hex: "FAFAFA")   // near-white
     static let claudeAccent = Color(hex: "D97757")            // terracotta
+    static let claudeBackground = Color(hex: "FAF9F5")      // warm off-white page bg
+    static let claudeDeepAccent = Color(hex: "C15F3C")       // deeper terracotta for emphasis
+    static let claudeWarmGray = Color(hex: "8B8680")          // warm gray for secondary text
+    static let claudeCardBg = Color(hex: "FFFFFF")            // pure white cards
+    static let claudeSurfaceTint = Color(hex: "F5F0E8")       // tinted surface
+    static let claudeDivider = Color(hex: "E8E4DE")           // warm divider
 
     init(hex: String) {
         let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)

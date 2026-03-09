@@ -1,7 +1,7 @@
 import SwiftUI
 import SwiftData
 
-struct HomeView: View {
+struct ConversationView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
 
@@ -12,7 +12,6 @@ struct HomeView: View {
     @State private var chatService = ChatService()
     @State private var autoSaveService = AutoSaveService()
     @State private var speechService = SpeechService()
-    @State private var petState = PetState()
     @State private var photoPickerService = PhotoPickerService()
     @State private var videoPickerService = VideoPickerService()
     @State private var insightService = InsightService()
@@ -29,84 +28,91 @@ struct HomeView: View {
     @State private var showSaveConfirmation = false
     @State private var hasLoadedProactive = false
 
+    var petState: PetState
+    var dismiss: () -> Void
+
     private var hasUserMessages: Bool {
         feedItems.contains { if case .userMessage = $0 { return true } else { return false } }
     }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            VStack(spacing: 0) {
-                // Pet area (compact)
-                petSection
-                    .frame(height: 100)
+        NavigationStack {
+            ZStack(alignment: .topTrailing) {
+                VStack(spacing: 0) {
+                    // Feed
+                    feedSection
 
-                Divider()
+                    Divider()
 
-                // Feed (replaces chat section)
-                feedSection
-
-                Divider()
-
-                // Voice input bar
-                VoiceChatBar(
-                    text: $inputText,
-                    speechService: speechService,
-                    isStreaming: pipeline.isRunning,
-                    photoPickerService: photoPickerService,
-                    videoPickerService: videoPickerService,
-                    locationService: locationService,
-                    onSend: sendMessage
-                )
-            }
-
-            // Save as Diary button
-            if hasUserMessages && !pipeline.isRunning && !autoSaveService.isSaving {
-                Button(action: manualSave) {
-                    Label("Save as Diary", systemImage: "book.closed")
-                        .font(.caption.weight(.medium))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Capsule())
+                    // Multimodal input
+                    MultimodalInputBar(
+                        text: $inputText,
+                        speechService: speechService,
+                        isStreaming: pipeline.isRunning,
+                        photoPickerService: photoPickerService,
+                        videoPickerService: videoPickerService,
+                        locationService: locationService,
+                        onSend: sendMessage
+                    )
                 }
-                .padding(.trailing, 16)
-                .padding(.top, 8)
-            }
+                .background(Color.claudeBackground)
 
-            // Saving indicator
-            if autoSaveService.isSaving {
-                HStack(spacing: 6) {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                    Text("Saving...")
-                        .font(.caption.weight(.medium))
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(.ultraThinMaterial)
-                .clipShape(Capsule())
-                .padding(.trailing, 16)
-                .padding(.top, 8)
-            }
-
-            // Toast confirmation
-            if showSaveConfirmation {
-                Text("Saved to Diary")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color.green.opacity(0.9))
+                // Saving indicator
+                if autoSaveService.isSaving {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                        Text("Saving...")
+                            .font(.caption.weight(.medium))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(.ultraThinMaterial)
                     .clipShape(Capsule())
                     .padding(.trailing, 16)
                     .padding(.top, 8)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+                // Toast confirmation
+                if showSaveConfirmation {
+                    Text("Saved to Diary")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Color.green.opacity(0.9))
+                        .clipShape(Capsule())
+                        .padding(.trailing, 16)
+                        .padding(.top, 8)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            .navigationTitle("Echo")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Color.claudeAccent)
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if hasUserMessages && !pipeline.isRunning && !autoSaveService.isSaving {
+                        Button(action: manualSave) {
+                            Label("Save", systemImage: "book.closed")
+                                .font(.caption.weight(.medium))
+                        }
+                        .foregroundStyle(Color.claudeAccent)
+                    }
+                }
             }
         }
         .onAppear {
             Task { await speechService.requestPermissions() }
             loadProactiveCards()
-            // Load RAG index; rebuild if empty
             ragService.loadIndex()
             if ragService.indexCount == 0, !recentEntries.isEmpty {
                 ragService.rebuildIndex(entries: Array(recentEntries))
@@ -122,25 +128,7 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Pet Section (compact, 100pt)
-
-    private var petSection: some View {
-        VStack(spacing: 2) {
-            PetView(petState: petState)
-                .scaleEffect(0.55)
-                .frame(height: 80)
-
-            Text(greetingService.generateGreeting(entries: Array(recentEntries), habits: Array(allHabits)))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-                .lineLimit(2)
-        }
-        .padding(.top, 4)
-    }
-
-    // MARK: - Feed Section (replaces chatSection)
+    // MARK: - Feed Section
 
     private var feedSection: some View {
         ScrollViewReader { proxy in
@@ -353,9 +341,4 @@ struct HomeView: View {
             }
         }
     }
-}
-
-#Preview {
-    HomeView()
-        .modelContainer(for: [DiaryEntry.self, WeeklyReview.self, ScheduleItem.self, HabitEntry.self], inMemory: true)
 }

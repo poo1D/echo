@@ -7,7 +7,13 @@ enum PetMood: String, CaseIterable {
 }
 
 enum PetAnimation: String {
-    case idle, wingFlap, shyLookDown, jump, nod
+    case idle, wingFlap, shyLookDown, jump, nod, searching
+}
+
+enum PipelinePhase {
+    case agentsRunning
+    case synthesizing
+    case completed
 }
 
 @Observable
@@ -38,6 +44,24 @@ class PetState {
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(1.5))
             currentAnimation = .idle
+        }
+    }
+
+    func reactToPipeline(_ phase: PipelinePhase) {
+        switch phase {
+        case .agentsRunning:
+            currentAnimation = .searching
+        case .synthesizing:
+            currentAnimation = .nod
+        case .completed:
+            currentAnimation = .wingFlap
+        }
+
+        if phase == .completed {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1.5))
+                currentAnimation = .idle
+            }
         }
     }
 }
@@ -225,6 +249,15 @@ struct PetView: View {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 withAnimation(.easeInOut(duration: 0.2)) { headTilt = 0 }
+            }
+
+        case .searching:
+            // Head rotates left and right, looking around
+            withAnimation(.easeInOut(duration: 0.3).repeatCount(6, autoreverses: true)) {
+                headTilt = 15
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                withAnimation(.easeInOut(duration: 0.3)) { headTilt = 0 }
             }
 
         case .idle:
