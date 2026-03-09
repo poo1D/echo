@@ -63,11 +63,11 @@ final class InsightService {
         }.joined(separator: "\n")
 
         let prompt = """
-        You are Echo, a cute penguin diary companion. Based on this week's diary entries, write a short \
-        (2-3 sentence) personal observation. Be warm, specific, reference actual entries. Speak in first person \
-        as the penguin. Don't use quotation marks.
+        你是Echo，一只可爱的企鹅日记伙伴。根据本周的日记内容，以私人信件的形式写一封温暖的信（4-6句话）。\
+        以一个个人观察开始，提及具体的日记内容或发现的模式，最后给予鼓励。\
+        用中文写，不要使用引号，不要加开头称呼和落款。
 
-        This week's entries:
+        本周日记:
         \(entrySummaries)
         """
 

@@ -18,48 +18,66 @@ struct UnifiedView: View {
     @State private var showDeleteConfirmation = false
     @State private var selectedTags: Set<String> = []
     @State private var showTagFilter = false
+    @State private var showMoodPicker = false
+    @State private var todayMoodEmoji: String?
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                // Echo Hub (penguin + proactive bubbles)
-                EchoHubSection(
-                    petState: petState,
-                    greeting: greetingService.generateGreeting(
-                        entries: Array(entries),
-                        habits: Array(allHabits)
-                    ),
-                    proactiveCards: proactiveCards,
-                    onTapEcho: {
-                        showConversation = true
-                    },
-                    onQuickAction: handleQuickAction
-                )
-
-                // Gradient fade
-                Rectangle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.claudeBackground.opacity(0), Color.claudeBackground],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
+        ZStack(alignment: .topTrailing) {
+            ScrollView {
+                VStack(spacing: 0) {
+                    // Echo Hub (penguin + proactive bubbles)
+                    EchoHubSection(
+                        petState: petState,
+                        greeting: greetingService.generateGreeting(
+                            entries: Array(entries),
+                            habits: Array(allHabits)
+                        ),
+                        proactiveCards: proactiveCards,
+                        onTapEcho: {
+                            showConversation = true
+                        },
+                        onQuickAction: handleQuickAction
                     )
-                    .frame(height: 20)
 
-                // Diary timeline
-                DiaryTimelineSection(
-                    entries: Array(entries),
-                    selectedEntry: $selectedEntry,
-                    editingEntry: $editingEntry,
-                    showTagFilter: $showTagFilter,
-                    selectedTags: selectedTags,
-                    onDeleteRequest: { entry in
-                        entryToDelete = entry
-                        showDeleteConfirmation = true
-                    }
-                )
+                    // Gradient fade
+                    Rectangle()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.claudeBackground.opacity(0), Color.claudeBackground],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(height: 20)
+
+                    // Diary timeline
+                    DiaryTimelineSection(
+                        entries: Array(entries),
+                        selectedEntry: $selectedEntry,
+                        editingEntry: $editingEntry,
+                        showTagFilter: $showTagFilter,
+                        selectedTags: selectedTags,
+                        onDeleteRequest: { entry in
+                            entryToDelete = entry
+                            showDeleteConfirmation = true
+                        }
+                    )
+                }
             }
+
+            // Floating mood picker button
+            Button {
+                showMoodPicker = true
+            } label: {
+                Text(todayMoodEmoji ?? "😊")
+                    .font(.system(size: 24))
+                    .frame(width: 44, height: 44)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 16)
+            .padding(.top, 8)
         }
         .background(Color.claudeBackground)
         .fullScreenCover(isPresented: $showConversation) {
@@ -99,6 +117,17 @@ struct UnifiedView: View {
             }
         } message: {
             Text("This will permanently delete this diary entry and its associated files.")
+        }
+        .sheet(isPresented: $showMoodPicker) {
+            MoodPickerPopover(
+                isPresented: $showMoodPicker,
+                todayMoodEmoji: $todayMoodEmoji
+            )
+            .presentationDetents([.height(220)])
+            .presentationDragIndicator(.visible)
+        }
+        .onAppear {
+            loadTodayMood()
         }
     }
 
@@ -181,6 +210,18 @@ struct UnifiedView: View {
             }
         default:
             break
+        }
+    }
+
+    // MARK: - Load Today's Mood
+
+    private func loadTodayMood() {
+        let calendar = Calendar.current
+        let todayStart = calendar.startOfDay(for: Date())
+        let sentinel = MoodUtils.moodCheckinTopic
+        let todayEntries = entries.filter { $0.createdAt >= todayStart }
+        if let existing = todayEntries.first(where: { $0.topics.contains(sentinel) }) {
+            todayMoodEmoji = existing.moodEmoji
         }
     }
 
