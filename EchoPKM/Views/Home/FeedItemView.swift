@@ -47,9 +47,7 @@ private struct ProactiveCardView: View {
             Spacer()
         }
         .padding(12)
-        .background(Color.claudeAssistantBubble)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.04), radius: 3, y: 1)
+        .glassCard(tint: .glassDefaultTint, cornerRadius: 14)
         .padding(.horizontal)
     }
 }
@@ -64,21 +62,9 @@ private struct UserBubbleView: View {
             Spacer(minLength: 60)
 
             VStack(alignment: .trailing, spacing: 6) {
-                // Photo thumbnails
+                // Stacked photo display
                 if !data.photoFileNames.isEmpty {
-                    HStack(spacing: 6) {
-                        ForEach(data.photoFileNames, id: \.self) { fileName in
-                            let url = PhotoPickerService.photoURL(for: fileName)
-                            if let imageData = try? Data(contentsOf: url),
-                               let uiImage = UIImage(data: imageData) {
-                                Image(uiImage: uiImage)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 80, height: 80)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                            }
-                        }
-                    }
+                    StackedPhotosView(photoFileNames: data.photoFileNames)
                 }
 
                 // Video thumbnails
@@ -100,89 +86,301 @@ private struct UserBubbleView: View {
     }
 }
 
+// MARK: - Stacked Photos View
+
+private struct StackedPhotosView: View {
+    let photoFileNames: [String]
+
+    // Order tracks which photo is on top; indices into photoFileNames
+    @State private var order: [Int] = []
+    @State private var dragOffset: CGSize = .zero
+    @State private var isDragging = false
+
+    // Transforms for background cards (index 0 = bottom-most visible)
+    private static let bgTransforms: [(rotation: Double, x: CGFloat, y: CGFloat)] = [
+        (-8, -25, 14),
+        (6,  20, -10),
+        (-4, -15, -16),
+        (5,  18,  8),
+    ]
+
+    var body: some View {
+        let count = photoFileNames.count
+
+        if count == 1 {
+            singlePhotoView(fileName: photoFileNames[0])
+        } else {
+            stackedDraggableView
+        }
+    }
+
+    // MARK: - Single Photo
+
+    private func singlePhotoView(fileName: String) -> some View {
+        let url = PhotoPickerService.photoURL(for: fileName)
+        return Group {
+            if let data = try? Data(contentsOf: url),
+               let uiImage = UIImage(data: data) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 200, height: 200)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+            } else {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color(.systemGray5))
+                    .frame(width: 200, height: 200)
+            }
+        }
+    }
+
+    // MARK: - Stacked + Draggable
+
+    private var stackedDraggableView: some View {
+        let indices = currentOrder
+        let total = indices.count
+        // Show up to 3 cards: bottom cards first, top card last
+        let visible = Array(indices.suffix(min(3, total)))
+
+        return ZStack {
+            ForEach(Array(visible.enumerated()), id: \.element) { stackPos, photoIndex in
+                let isTop = stackPos == visible.count - 1
+                let depth = visible.count - 1 - stackPos  // 0 = top, 1 = second, 2 = third
+
+                photoCard(fileName: photoFileNames[photoIndex], size: isTop ? 155 : 135)
+                    .rotationEffect(cardRotation(isTop: isTop, depth: depth))
+                    .offset(cardOffset(isTop: isTop, depth: depth))
+                    .scaleEffect(isTop ? 1.0 : 1.0 - CGFloat(depth) * 0.04)
+                    .zIndex(Double(stackPos))
+                    .gesture(isTop ? dragGesture : nil)
+            }
+
+            // Photo counter badge
+            if total > 1 {
+                Text("\(topDisplayIndex + 1)/\(total)")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(.black.opacity(0.5), in: Capsule())
+                    .offset(x: 55, y: -75)
+                    .zIndex(10)
+            }
+        }
+        .frame(width: 220, height: 220)
+        .onAppear {
+            if order.isEmpty {
+                order = Array(0..<photoFileNames.count)
+            }
+        }
+    }
+
+    private var currentOrder: [Int] {
+        order.isEmpty ? Array(0..<photoFileNames.count) : order
+    }
+
+    private var topDisplayIndex: Int {
+        currentOrder.last ?? 0
+    }
+
+    // MARK: - Card Transforms
+
+    private func cardRotation(isTop: Bool, depth: Int) -> Angle {
+        if isTop {
+            // Slight rotation follows drag
+            return .degrees(Double(dragOffset.width) / 20)
+        }
+        let t = Self.bgTransforms[depth % Self.bgTransforms.count]
+        return .degrees(t.rotation)
+    }
+
+    private func cardOffset(isTop: Bool, depth: Int) -> CGSize {
+        if isTop {
+            return dragOffset
+        }
+        let t = Self.bgTransforms[depth % Self.bgTransforms.count]
+        return CGSize(width: t.x, height: t.y)
+    }
+
+    // MARK: - Drag Gesture
+
+    private var dragGesture: some Gesture {
+        DragGesture()
+            .onChanged { value in
+                isDragging = true
+                dragOffset = value.translation
+            }
+            .onEnded { value in
+                let threshold: CGFloat = 60
+                let totalDrag = abs(value.translation.width) + abs(value.translation.height)
+
+                if totalDrag > threshold {
+                    // Fling the top card away, then cycle
+                    let flyX = value.translation.width * 3
+                    let flyY = value.translation.height * 3
+
+                    withAnimation(.easeIn(duration: 0.2)) {
+                        dragOffset = CGSize(width: flyX, height: flyY)
+                    }
+
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        // Move top card to the bottom
+                        var newOrder = currentOrder
+                        let top = newOrder.removeLast()
+                        newOrder.insert(top, at: 0)
+
+                        dragOffset = .zero
+                        isDragging = false
+
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                            order = newOrder
+                        }
+                    }
+                } else {
+                    // Snap back
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        dragOffset = .zero
+                        isDragging = false
+                    }
+                }
+            }
+    }
+
+    // MARK: - Photo Card
+
+    private func photoCard(fileName: String, size: CGFloat) -> some View {
+        let url = PhotoPickerService.photoURL(for: fileName)
+        return Group {
+            if let data = try? Data(contentsOf: url),
+               let uiImage = UIImage(data: data) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: size, height: size * 1.2)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(.white, lineWidth: 2.5)
+                    )
+                    .shadow(color: .black.opacity(0.15), radius: 6, y: 3)
+            } else {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(.systemGray5))
+                    .frame(width: size, height: size * 1.2)
+            }
+        }
+    }
+}
+
 // MARK: - Agent Pipeline Visualization
 
 struct AgentPipelineView: View {
     let snapshot: PipelineSnapshot
 
     var body: some View {
-        VStack(spacing: 6) {
-            // Phase 0: On-device RAG
-            agentRow(icon: "antenna.radiowaves.left.and.right",
-                     name: "语义检索",
-                     status: snapshot.ragStatus)
-            agentRow(icon: "brain.head.profile", name: "情绪分析", status: snapshot.emotionStatus)
-            agentRow(icon: "magnifyingglass", name: "记忆分析", status: snapshot.memoryStatus)
-            agentRow(icon: "bolt.fill", name: "行动提取", status: snapshot.actionStatus)
-
-            if case .running = snapshot.synthesisStatus {
-                HStack(spacing: 8) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.claudeAccent)
-                    Text("正在综合回复...")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    ProgressView()
-                        .scaleEffect(0.7)
+        VStack(spacing: 10) {
+            // Intent label
+            if let intentType = snapshot.intentType {
+                HStack(spacing: 6) {
+                    Image(systemName: "target")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(intentType)
+                        .font(.caption.weight(.semibold))
                 }
-                .padding(.top, 2)
+                .foregroundStyle(Color.claudeAccent)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(Color.claudeAccent.opacity(0.1), in: Capsule())
             }
-        }
-        .padding(12)
-        .background(Color(hex: "F8F8FA"))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal)
-    }
 
-    private func agentRow(icon: String, name: String, status: PipelineSnapshot.AgentStatus) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 12))
-                .foregroundStyle(statusColor(status))
-                .frame(width: 16)
+            // Agent circles row
+            HStack(spacing: 16) {
+                AgentCircle(
+                    emoji: "🧠",
+                    name: "情绪",
+                    status: snapshot.emotionStatus
+                )
+                AgentCircle(
+                    emoji: "🔎",
+                    name: "记忆",
+                    status: snapshot.memoryStatus
+                )
+                AgentCircle(
+                    emoji: "⚡",
+                    name: "行动",
+                    status: snapshot.actionStatus
+                )
+                AgentCircle(
+                    emoji: "💚",
+                    name: "健康",
+                    status: snapshot.healthStatus
+                )
+            }
 
-            Text(name)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.primary)
+            // Connector lines to synthesis
+            if isSynthesizing || isSynthesisComplete {
+                VStack(spacing: 4) {
+                    // Converging lines visual
+                    HStack(spacing: 0) {
+                        ForEach(0..<3, id: \.self) { _ in
+                            Rectangle()
+                                .fill(Color.claudeAccent.opacity(0.3))
+                                .frame(width: 1, height: 16)
+                        }
+                    }
+                    .frame(width: 60)
 
-            Spacer()
+                    // Synthesis bubble
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.claudeAccent)
 
-            switch status {
-            case .idle:
-                Text("Waiting")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            case .running:
-                HStack(spacing: 4) {
-                    ProgressView()
-                        .scaleEffect(0.6)
-                    Text("Running...")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        if case .running = snapshot.synthesisStatus {
+                            ThinkingDotsView()
+                        } else if case .completed = snapshot.synthesisStatus {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Color(hex: "4CAF50"))
+                        } else {
+                            Text("合成中")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Color.claudeAssistantBubble)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .shadow(color: .black.opacity(0.04), radius: 3, y: 1)
                 }
-            case .completed(let summary):
-                HStack(spacing: 4) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color(hex: "4CAF50"))
+            }
+
+            // RAG status (compact)
+            HStack(spacing: 6) {
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                    .font(.system(size: 10))
+                    .foregroundStyle(statusColor(snapshot.ragStatus))
+                if case .completed(let summary) = snapshot.ragStatus {
                     Text(summary)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            case .failed:
-                HStack(spacing: 4) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.red.opacity(0.7))
-                    Text("Failed")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                 }
             }
         }
+        .padding(14)
+        .glassCard(tint: nil, cornerRadius: 14)
+        .padding(.horizontal)
+    }
+
+    private var isSynthesizing: Bool {
+        if case .running = snapshot.synthesisStatus { return true }
+        return false
+    }
+
+    private var isSynthesisComplete: Bool {
+        if case .completed = snapshot.synthesisStatus { return true }
+        return false
     }
 
     private func statusColor(_ status: PipelineSnapshot.AgentStatus) -> Color {
@@ -190,7 +388,133 @@ struct AgentPipelineView: View {
         case .idle: return .gray
         case .running: return Color.claudeAccent
         case .completed: return Color(hex: "4CAF50")
+        case .skipped: return .gray.opacity(0.4)
         case .failed: return .red.opacity(0.7)
+        }
+    }
+}
+
+// MARK: - Agent Circle
+
+private struct AgentCircle: View {
+    let emoji: String
+    let name: String
+    let status: PipelineSnapshot.AgentStatus
+
+    @State private var rotation: Double = 0
+    @State private var showCheck = false
+
+    var body: some View {
+        VStack(spacing: 4) {
+            ZStack {
+                // Background circle
+                Circle()
+                    .fill(circleBackground)
+                    .frame(width: 44, height: 44)
+
+                // Running: spinning ring
+                if case .running = status {
+                    Circle()
+                        .trim(from: 0, to: 0.7)
+                        .stroke(Color.claudeAccent, lineWidth: 2.5)
+                        .frame(width: 44, height: 44)
+                        .rotationEffect(.degrees(rotation))
+                }
+
+                // Skipped: dashed circle
+                if case .skipped = status {
+                    Circle()
+                        .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                        .foregroundStyle(.gray.opacity(0.4))
+                        .frame(width: 44, height: 44)
+                }
+
+                // Content
+                if case .skipped = status {
+                    Text("--")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.gray.opacity(0.5))
+                } else if showCheck {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(Color(hex: "4CAF50"))
+                        .transition(.scale.combined(with: .opacity))
+                } else if case .failed = status {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.red.opacity(0.7))
+                } else {
+                    Text(emoji)
+                        .font(.system(size: 18))
+                }
+            }
+
+            Text(name)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle({
+                    switch status {
+                    case .skipped: return Color.secondary.opacity(0.5)
+                    default: return Color.secondary
+                    }
+                }())
+        }
+        .onAppear {
+            if case .running = status {
+                withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
+                    rotation = 360
+                }
+            }
+        }
+        .onChange(of: status) { oldStatus, newStatus in
+            if case .completed = newStatus {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                    showCheck = true
+                }
+            }
+            if case .running = newStatus {
+                rotation = 0
+                withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
+                    rotation = 360
+                }
+            }
+        }
+    }
+
+    private var circleBackground: Color {
+        switch status {
+        case .idle: return Color(hex: "F0F0F2")
+        case .running: return Color.claudeAccent.opacity(0.1)
+        case .completed: return Color(hex: "E8F5E9")
+        case .skipped: return Color(hex: "F5F5F5")
+        case .failed: return Color.red.opacity(0.08)
+        }
+    }
+}
+
+// MARK: - Thinking Dots Animation
+
+private struct ThinkingDotsView: View {
+    @State private var dotOffsets: [CGFloat] = [0, 0, 0]
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .fill(Color.claudeAccent)
+                    .frame(width: 5, height: 5)
+                    .offset(y: dotOffsets[index])
+            }
+        }
+        .onAppear {
+            for i in 0..<3 {
+                withAnimation(
+                    .easeInOut(duration: 0.4)
+                    .repeatForever(autoreverses: true)
+                    .delay(Double(i) * 0.15)
+                ) {
+                    dotOffsets[i] = -4
+                }
+            }
         }
     }
 }
@@ -267,8 +591,7 @@ private struct ActionConfirmView: View {
             }
         }
         .padding(10)
-        .background(Color(hex: "E8F5E9").opacity(0.5))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .glassCardCompact(tint: .glassSuccessTint)
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .stroke(Color(hex: "4CAF50").opacity(0.3), lineWidth: 1)

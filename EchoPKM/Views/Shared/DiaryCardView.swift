@@ -3,6 +3,8 @@ import SwiftUI
 struct DiaryCard: View {
     let entry: DiaryEntry
 
+    @State private var showFullInsight = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             // 1. Photo grid
@@ -24,7 +26,7 @@ struct DiaryCard: View {
             Text(entry.summary)
                 .font(.body)
                 .foregroundStyle(.primary)
-                .lineLimit(4)
+                .lineLimit(showFullInsight ? nil : 4)
 
             // 4. Bottom info row: mood + location + time
             HStack(spacing: 12) {
@@ -66,7 +68,7 @@ struct DiaryCard: View {
                 }
             }
 
-            // 6. AI Insight
+            // 6. AI Insight (expandable on long press)
             if let insight = entry.aiInsight {
                 HStack(spacing: 6) {
                     Image(systemName: "sparkles")
@@ -75,14 +77,24 @@ struct DiaryCard: View {
                     Text(insight)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .lineLimit(showFullInsight ? nil : 2)
                 }
+                .padding(showFullInsight ? 8 : 0)
+                .background(showFullInsight ? Color.purple.opacity(0.05) : .clear)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             }
         }
         .padding()
-        .background(Color.claudeCardBg)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.06), radius: 8, y: 3)
+        .glassCard()
+        .scaleEffect(showFullInsight ? 1.02 : 1.0)
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showFullInsight)
         .padding(.horizontal)
+        .onLongPressGesture(minimumDuration: 0.5) {
+            let generator = UIImpactFeedbackGenerator(style: .medium)
+            generator.impactOccurred()
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                showFullInsight.toggle()
+            }
+        }
     }
 }

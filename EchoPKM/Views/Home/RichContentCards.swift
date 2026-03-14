@@ -11,8 +11,8 @@ struct MemoryRecallCard: View {
                 Image(systemName: "brain.head.profile")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color(hex: "7B68EE"))
-                Text("Related Memory")
-                    .font(.caption.weight(.semibold))
+                Text("相关记忆")
+                    .font(.yuantiCaption.weight(.semibold))
                     .foregroundStyle(Color(hex: "7B68EE"))
                 Spacer()
                 Text(data.date.formatted(date: .abbreviated, time: .omitted))
@@ -39,8 +39,7 @@ struct MemoryRecallCard: View {
             }
         }
         .padding(12)
-        .background(Color(hex: "F0EDFF").opacity(0.6))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .glassCardCompact(tint: .glassMemoryTint)
     }
 }
 
@@ -55,8 +54,8 @@ struct MoodTrendCard: View {
                 Image(systemName: trendIcon)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(trendColor)
-                Text("Mood Trend")
-                    .font(.caption.weight(.semibold))
+                Text("心情趋势")
+                    .font(.yuantiCaption.weight(.semibold))
                     .foregroundStyle(trendColor)
             }
 
@@ -77,8 +76,7 @@ struct MoodTrendCard: View {
             }
         }
         .padding(12)
-        .background(trendColor.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .glassCardCompact(tint: trendColor.opacity(0.15))
     }
 
     private var trendIcon: String {
@@ -136,7 +134,7 @@ struct ScheduleConfirmCard: View {
             Spacer()
 
             if data.isNew {
-                Text("Added")
+                Text("已添加")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 8)
@@ -146,8 +144,7 @@ struct ScheduleConfirmCard: View {
             }
         }
         .padding(12)
-        .background(Color(hex: "E8F4FD").opacity(0.6))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .glassCardCompact(tint: Color(hex: "4A90D9").opacity(0.12))
     }
 }
 
@@ -165,7 +162,7 @@ struct HabitStreakCard: View {
                 Text(data.habitName.capitalized)
                     .font(.subheadline.weight(.medium))
                 HStack(spacing: 4) {
-                    Text("This week: \(data.streakCount)x")
+                    Text("本周: \(data.streakCount)次")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     if data.change > 0 {
@@ -188,8 +185,7 @@ struct HabitStreakCard: View {
             }
         }
         .padding(12)
-        .background(Color(hex: "FFF3E0").opacity(0.6))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .glassCardCompact(tint: .glassHabitTint)
     }
 }
 
@@ -204,12 +200,12 @@ struct PatternInsightCard: View {
                 Image(systemName: "lightbulb.fill")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color(hex: "FFB347"))
-                Text("Pattern")
-                    .font(.caption.weight(.semibold))
+                Text("规律")
+                    .font(.yuantiCaption.weight(.semibold))
                     .foregroundStyle(Color(hex: "FFB347"))
                 if data.occurrences > 0 {
                     Spacer()
-                    Text("\(data.occurrences)x observed")
+                    Text("观察到 \(data.occurrences) 次")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -226,8 +222,7 @@ struct PatternInsightCard: View {
             }
         }
         .padding(12)
-        .background(Color(hex: "FFF8E1").opacity(0.6))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .glassCardCompact(tint: Color(hex: "FFB347").opacity(0.12))
     }
 }
 
@@ -248,6 +243,58 @@ struct RichContentCardView: View {
             HabitStreakCard(data: data)
         case .patternInsight(let data):
             PatternInsightCard(data: data)
+        case .healthInsight(let data):
+            HealthInsightCard(data: data)
+        }
+    }
+}
+
+// MARK: - Health Insight Card
+
+struct HealthInsightCard: View {
+    let data: HealthInsightData
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: iconName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(iconColor)
+                Text(data.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(iconColor)
+            }
+
+            Text(data.detail)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+
+            if let correlation = data.correlation, !correlation.isEmpty {
+                Text(correlation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .italic()
+            }
+        }
+        .padding(12)
+        .glassCardCompact(tint: .glassHealthTint)
+    }
+
+    private var iconName: String {
+        switch data.type {
+        case .sleepMood: return "moon.fill"
+        case .exerciseBoost: return "figure.run"
+        case .stepGoal: return "shoeprints.fill"
+        case .sleepWarning: return "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var iconColor: Color {
+        switch data.type {
+        case .sleepMood: return Color(hex: "7B68EE")
+        case .exerciseBoost: return Color(hex: "4CAF50")
+        case .stepGoal: return Color(hex: "FF6B35")
+        case .sleepWarning: return Color(hex: "FFB347")
         }
     }
 }
