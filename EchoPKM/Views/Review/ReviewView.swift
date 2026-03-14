@@ -12,7 +12,8 @@ struct ReviewView: View {
     @State private var isLoadingObservation = false
     @State private var petState = PetState()
     @State private var insightService = InsightService()
-    @State private var showLetterSheet = false
+    @State private var healthService = HealthKitService()
+    @State private var healthSnapshot: HealthSnapshot?
 
     var body: some View {
         NavigationStack {
@@ -27,15 +28,26 @@ struct ReviewView: View {
                     // Module 2: Habit Heatmap
                     habitHeatmapCard
 
-                    // Module 3: Weekly Letter
+                    // Module 3: Health Trends
+                    healthTrendCard
+
+                    // Module 4: Weekly Letter
                     weeklyLetterCard
                 }
                 .padding()
+                .modifier(GlassEffectContainerModifier())
             }
-            .background(Color.claudeBackground)
-            .navigationTitle("回顾")
+            .background { WarmGradientBackground() }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("回顾")
+                        .font(.yuanti(20, weight: .bold))
+                }
+            }
             .task(id: weekOffset) {
                 await loadPetObservation()
+                await loadHealthData()
             }
         }
     }
@@ -144,7 +156,7 @@ struct ReviewView: View {
             // Header
             HStack {
                 Label("心情趋势", systemImage: "heart.fill")
-                    .font(.headline)
+                    .font(.yuantiHeadline)
                     .foregroundStyle(.primary)
 
                 Spacer()
@@ -233,147 +245,344 @@ struct ReviewView: View {
             }
         }
         .padding(16)
-        .background(Color.claudeCardBg)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.04), radius: 6, y: 3)
+        .glassCard(tint: .glassMoodTint)
     }
 
-    // MARK: - Module 2: Habit Heatmap
+    // MARK: - Module 2: Habit Tracker
 
-    private struct HeatmapDay: Identifiable {
+    private enum DayStatus {
+        case completed, missed, future
+    }
+
+    private struct HabitWeekRow: Identifiable {
         let id = UUID()
-        let date: Date
-        let count: Int
-        let isFuture: Bool
+        let habitName: String
+        let emoji: String
+        let dailyStatus: [DayStatus] // 7 entries: Mon-Sun
+        let weekCount: Int
     }
 
-    private var heatmapData: [HeatmapDay] {
+    private var habitWeekRows: [HabitWeekRow] {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
 
-        // Find the Monday of 4 weeks ago
-        let currentWeekday = calendar.component(.weekday, from: today)
-        // weekday: 1=Sun, 2=Mon, ... 7=Sat. Convert to Mon=1 based.
-        let daysFromMonday = (currentWeekday + 5) % 7 // Mon=0, Tue=1, ..., Sun=6
-        let thisMonday = calendar.date(byAdding: .day, value: -daysFromMonday, to: today)!
-        let startMonday = calendar.date(byAdding: .weekOfYear, value: -4, to: thisMonday)!
+        // Collect all unique habit names ever recorded
+        let allNames = Set(allHabits.map { $0.name.lowercased() })
+        guard !allNames.isEmpty else { return [] }
 
-        // Count habits per day
-        var habitsByDay: [Date: Int] = [:]
-        for habit in allHabits {
-            let day = calendar.startOfDay(for: habit.date)
-            if day >= startMonday {
-                habitsByDay[day, default: 0] += 1
+        // Build a set of (habitName, dayStart) for the selected week
+        let weekHabits = allHabits.filter { $0.date >= selectedWeekStart && $0.date < selectedWeekEnd }
+        var completedSet: Set<String> = [] // "name|dayIndex"
+        for habit in weekHabits {
+            let dayStart = calendar.startOfDay(for: habit.date)
+            let dayIndex = calendar.dateComponents([.day], from: selectedWeekStart, to: dayStart).day ?? 0
+            if dayIndex >= 0 && dayIndex < 7 {
+                completedSet.insert("\(habit.name.lowercased())|\(dayIndex)")
             }
         }
 
-        // Generate 35 days (5 weeks x 7 days)
-        return (0..<35).map { offset in
-            let date = calendar.date(byAdding: .day, value: offset, to: startMonday)!
-            let dayStart = calendar.startOfDay(for: date)
-            let count = habitsByDay[dayStart] ?? 0
-            let isFuture = dayStart > today
-            return HeatmapDay(date: date, count: count, isFuture: isFuture)
+        // Build rows
+        var rows: [HabitWeekRow] = []
+        for name in allNames {
+            let emoji = HabitStreakData.emojiFor(name)
+            var statuses: [DayStatus] = []
+            var count = 0
+            for dayIndex in 0..<7 {
+                let date = calendar.date(byAdding: .day, value: dayIndex, to: selectedWeekStart)!
+                let dayStart = calendar.startOfDay(for: date)
+                if dayStart > today {
+                    statuses.append(.future)
+                } else if completedSet.contains("\(name)|\(dayIndex)") {
+                    statuses.append(.completed)
+                    count += 1
+                } else {
+                    statuses.append(.missed)
+                }
+            }
+            rows.append(HabitWeekRow(habitName: name, emoji: emoji, dailyStatus: statuses, weekCount: count))
         }
-    }
 
-    private func heatmapColor(for count: Int, isFuture: Bool) -> Color {
-        if isFuture { return Color.claudeSurfaceTint.opacity(0.3) }
-        switch count {
-        case 0: return Color.claudeSurfaceTint
-        case 1: return Color.claudeAccent.opacity(0.3)
-        case 2: return Color.claudeAccent.opacity(0.6)
-        default: return Color.claudeAccent.opacity(0.9)
+        // Sort: by week count descending, then alphabetically
+        rows.sort { lhs, rhs in
+            if lhs.weekCount != rhs.weekCount { return lhs.weekCount > rhs.weekCount }
+            return lhs.habitName < rhs.habitName
         }
+
+        return rows
     }
 
     private var habitHeatmapCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Header
             HStack {
-                Label("习惯热力图", systemImage: "square.grid.3x3.fill")
-                    .font(.headline)
+                Label("习惯追踪", systemImage: "square.grid.3x3.fill")
+                    .font(.yuantiHeadline)
+                    .foregroundStyle(.primary)
+
+                Spacer()
+            }
+
+            if allHabits.isEmpty {
+                // Empty state
+                VStack(spacing: 8) {
+                    Image(systemName: "square.grid.3x3")
+                        .font(.largeTitle)
+                        .foregroundStyle(Color.claudeWarmGray.opacity(0.4))
+                    Text("还没有记录习惯哦")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Text("和Echo聊天时提到你的日常习惯，就会自动记录在这里")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+            } else {
+                let rows = habitWeekRows
+                let dayLabels = ["一", "二", "三", "四", "五", "六", "日"]
+
+                // Day-of-week header row
+                HStack(spacing: 0) {
+                    Text("")
+                        .frame(width: 72)
+
+                    ForEach(dayLabels, id: \.self) { label in
+                        Text(label)
+                            .font(.caption2)
+                            .foregroundStyle(Color.claudeWarmGray)
+                            .frame(maxWidth: .infinity)
+                    }
+
+                    Text("")
+                        .frame(width: 52)
+                }
+
+                // Per-habit rows
+                ForEach(rows) { row in
+                    HStack(spacing: 0) {
+                        // Emoji + name
+                        HStack(spacing: 4) {
+                            Text(row.emoji)
+                                .font(.system(size: 14))
+                            Text(row.habitName)
+                                .font(.caption)
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                        }
+                        .frame(width: 72, alignment: .leading)
+
+                        // 7-day status circles
+                        ForEach(0..<7, id: \.self) { dayIndex in
+                            Group {
+                                switch row.dailyStatus[dayIndex] {
+                                case .completed:
+                                    Circle()
+                                        .fill(Color.claudeAccent)
+                                        .frame(width: 10, height: 10)
+                                case .missed:
+                                    Circle()
+                                        .strokeBorder(Color.claudeDivider, lineWidth: 1.5)
+                                        .frame(width: 10, height: 10)
+                                case .future:
+                                    Text("·")
+                                        .font(.caption)
+                                        .foregroundStyle(Color.claudeWarmGray.opacity(0.4))
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+
+                        // Week count
+                        if row.weekCount > 0 {
+                            Text("本周\(row.weekCount)次")
+                                .font(.caption2)
+                                .foregroundStyle(Color.claudeWarmGray)
+                                .frame(width: 52, alignment: .trailing)
+                        } else {
+                            Text("")
+                                .frame(width: 52)
+                        }
+                    }
+                }
+
+                // Legend
+                HStack(spacing: 12) {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(Color.claudeAccent)
+                            .frame(width: 8, height: 8)
+                        Text("已完成")
+                            .font(.caption2)
+                            .foregroundStyle(Color.claudeWarmGray)
+                    }
+                    HStack(spacing: 4) {
+                        Circle()
+                            .strokeBorder(Color.claudeDivider, lineWidth: 1)
+                            .frame(width: 8, height: 8)
+                        Text("未记录")
+                            .font(.caption2)
+                            .foregroundStyle(Color.claudeWarmGray)
+                    }
+                    HStack(spacing: 4) {
+                        Text("·")
+                            .font(.caption2)
+                            .foregroundStyle(Color.claudeWarmGray.opacity(0.4))
+                        Text("未到")
+                            .font(.caption2)
+                            .foregroundStyle(Color.claudeWarmGray)
+                    }
+
+                    Spacer()
+
+                    let totalWeek = rows.reduce(0) { $0 + $1.weekCount }
+                    if totalWeek > 0 {
+                        Text("本周共完成 \(totalWeek) 个习惯打卡")
+                            .font(.caption2)
+                            .foregroundStyle(Color.claudeWarmGray)
+                    }
+                }
+                .padding(.top, 4)
+            }
+        }
+        .padding(16)
+        .glassCard(tint: .glassHabitTint)
+    }
+
+    // MARK: - Module 3: Health Trends Card
+
+    private var healthTrendCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("健康趋势", systemImage: "heart.text.square.fill")
+                    .font(.yuantiHeadline)
                     .foregroundStyle(.primary)
 
                 Spacer()
 
-                Text("近5周")
-                    .font(.caption)
-                    .foregroundStyle(Color.claudeWarmGray)
-            }
-
-            // Day-of-week header
-            let dayLabels = ["一", "二", "三", "四", "五", "六", "日"]
-            HStack(spacing: 0) {
-                // Week label spacer
-                Text("")
-                    .frame(width: 36)
-
-                ForEach(dayLabels, id: \.self) { label in
-                    Text(label)
-                        .font(.caption2)
+                if let hs = healthSnapshot {
+                    Text("今日\(hs.steps)步")
+                        .font(.caption)
                         .foregroundStyle(Color.claudeWarmGray)
-                        .frame(maxWidth: .infinity)
                 }
             }
 
-            // Grid: 5 rows x 7 columns
-            let weeks = stride(from: 0, to: 35, by: 7).map { start in
-                Array(heatmapData[start..<min(start + 7, heatmapData.count)])
-            }
+            if let hs = healthSnapshot {
+                // Sleep bar chart (7 days)
+                if !hs.weeklySleep.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("睡眠 (小时)")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
 
-            ForEach(Array(weeks.enumerated()), id: \.offset) { weekIndex, week in
-                HStack(spacing: 0) {
-                    // Week start label
-                    let weekDate = week.first?.date ?? Date()
-                    let fmt = DateFormatter()
-                    let _ = fmt.dateFormat = "M/d"
-                    Text(fmt.string(from: weekDate))
-                        .font(.caption2)
-                        .foregroundStyle(Color.claudeWarmGray)
-                        .frame(width: 36, alignment: .leading)
-
-                    ForEach(week) { day in
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(heatmapColor(for: day.count, isFuture: day.isFuture))
-                            .aspectRatio(1, contentMode: .fit)
-                            .padding(2)
-                            .frame(maxWidth: .infinity)
+                        Chart(Array(hs.weeklySleep.enumerated()), id: \.offset) { index, item in
+                            BarMark(
+                                x: .value("Day", dayLabel(for: item.date)),
+                                y: .value("Hours", item.hours)
+                            )
+                            .foregroundStyle(
+                                item.hours >= 7 ? Color(hex: "7B68EE").opacity(0.8) :
+                                item.hours >= 5 ? Color(hex: "7B68EE").opacity(0.5) :
+                                Color(hex: "FF6B35").opacity(0.7)
+                            )
+                            .cornerRadius(4)
+                        }
+                        .chartYScale(domain: 0...10)
+                        .frame(height: 120)
                     }
                 }
-            }
 
-            // Legend
-            HStack(spacing: 4) {
-                Text("少")
-                    .font(.caption2)
-                    .foregroundStyle(Color.claudeWarmGray)
+                // Steps line chart (7 days)
+                if !hs.weeklySteps.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("步数")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
 
-                ForEach([0, 1, 2, 3], id: \.self) { level in
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(heatmapColor(for: level, isFuture: false))
-                        .frame(width: 12, height: 12)
+                        Chart(Array(hs.weeklySteps.enumerated()), id: \.offset) { index, item in
+                            LineMark(
+                                x: .value("Day", dayLabel(for: item.date)),
+                                y: .value("Steps", item.steps)
+                            )
+                            .foregroundStyle(Color(hex: "4CAF50"))
+                            .lineStyle(StrokeStyle(lineWidth: 2))
+                            .interpolationMethod(.catmullRom)
+
+                            PointMark(
+                                x: .value("Day", dayLabel(for: item.date)),
+                                y: .value("Steps", item.steps)
+                            )
+                            .foregroundStyle(Color(hex: "4CAF50"))
+                        }
+                        .frame(height: 100)
+                    }
                 }
 
-                Text("多")
-                    .font(.caption2)
-                    .foregroundStyle(Color.claudeWarmGray)
+                // Correlation annotation
+                let correlations = computeCorrelations()
+                if !correlations.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(Array(correlations.enumerated()), id: \.offset) { _, corr in
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.triangle.branch")
+                                    .font(.caption2)
+                                    .foregroundStyle(Color.claudeAccent)
+                                Text(corr.description)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .padding(.top, 4)
+                }
 
-                Spacer()
-
-                let totalCompleted = heatmapData.filter { !$0.isFuture }.reduce(0) { $0 + $1.count }
-                Text("共\(totalCompleted)个完成")
-                    .font(.caption2)
-                    .foregroundStyle(Color.claudeWarmGray)
+                // Health insights
+                if !hs.insights.isEmpty {
+                    ForEach(Array(hs.insights.prefix(2).enumerated()), id: \.offset) { _, insight in
+                        HStack(spacing: 6) {
+                            Image(systemName: "sparkle")
+                                .font(.caption2)
+                                .foregroundStyle(Color.claudeAccent)
+                            Text(insight.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            } else {
+                VStack(spacing: 8) {
+                    Image(systemName: "heart.text.square")
+                        .font(.largeTitle)
+                        .foregroundStyle(Color.claudeWarmGray.opacity(0.4))
+                    Text("健康数据加载中...")
+                        .font(.subheadline)
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 100)
             }
         }
         .padding(16)
-        .background(Color.claudeCardBg)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.04), radius: 6, y: 3)
+        .glassCard(tint: .glassHealthTint)
     }
 
-    // MARK: - Module 3: Weekly Letter Card
+    private func dayLabel(for date: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "zh_CN")
+        fmt.dateFormat = "EEE"
+        return fmt.string(from: date)
+    }
+
+    private func computeCorrelations() -> [CorrelationEngine.Correlation] {
+        guard let hs = healthSnapshot else { return [] }
+        let entryMoodData = weekEntries.compactMap { entry -> CorrelationEngine.EntryMoodData? in
+            guard let score = entry.moodScore else { return nil }
+            return CorrelationEngine.EntryMoodData(date: entry.createdAt, moodScore: score)
+        }
+        return CorrelationEngine.analyze(entries: entryMoodData, healthData: hs)
+    }
+
+    // MARK: - Module 4: Weekly Letter Card
 
     private var weeklyLetterCard: some View {
         VStack(spacing: 0) {
@@ -407,15 +616,23 @@ struct ReviewView: View {
                     Text("Echo正在写信中...")
                         .font(.subheadline)
                         .foregroundStyle(Color.claudeWarmGray)
-                } else if petObservation != nil {
+                } else if let observation = petObservation {
                     Text("叮~ Echo给你写了一封信！")
-                        .font(.subheadline.weight(.medium))
+                        .font(.yuantiSubheadline.weight(.medium))
                         .foregroundStyle(.primary)
 
-                    Button {
-                        showLetterSheet = true
+                    Text(observation)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 4)
+
+                    NavigationLink {
+                        WeeklyLettersView()
                     } label: {
-                        Text("点击阅读")
+                        Text("查看所有来信")
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(Color.claudeAccent)
                             .padding(.horizontal, 20)
@@ -430,19 +647,7 @@ struct ReviewView: View {
             .padding(.horizontal, 20)
             .frame(maxWidth: .infinity)
         }
-        .background(Color.claudeCardBg)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.04), radius: 6, y: 3)
-        .sheet(isPresented: $showLetterSheet) {
-            if let observation = petObservation {
-                WeeklyLetterSheet(
-                    observation: observation,
-                    entryCount: weekEntries.count,
-                    weekLabel: weekLabel
-                )
-                .presentationDragIndicator(.visible)
-            }
-        }
+        .glassCard(tint: .glassLetterTint)
     }
 
     // MARK: - LLM Observation (with cache)
@@ -459,6 +664,11 @@ struct ReviewView: View {
             entries: weekEntries,
             modelContext: modelContext
         )
+    }
+
+    private func loadHealthData() async {
+        await healthService.requestAuthorization()
+        healthSnapshot = await healthService.buildSnapshot()
     }
 }
 

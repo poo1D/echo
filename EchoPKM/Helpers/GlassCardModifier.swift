@@ -71,3 +71,11 @@ struct WarmGradientBackground: View {
         .ignoresSafeArea()
     }
 }
+
+// MARK: - Glass Effect Container Modifier
+
+struct GlassEffectContainerModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+    }
+}
