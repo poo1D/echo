@@ -18,14 +18,14 @@ extension Color {
     static let moodWorried = Color(hex: "E8F0F8")            // calm blue-gray
     static let moodEnergized = Color(hex: "E6F9F0")          // fresh green
 
-    // Glass tint colors (for Liquid Glass effect)
-    static let glassDefaultTint = Color.claudeSurfaceTint.opacity(0.3)    // warm glass base
-    static let glassMoodTint = Color.claudeAccent.opacity(0.2)            // terracotta warm
-    static let glassHabitTint = Color(hex: "FF6B35").opacity(0.15)        // warm orange
-    static let glassHealthTint = Color(hex: "7B68EE").opacity(0.15)       // soft purple
-    static let glassLetterTint = Color.claudeAccent.opacity(0.15)         // envelope warm
-    static let glassMemoryTint = Color(hex: "7B68EE").opacity(0.12)       // purple
-    static let glassSuccessTint = Color(hex: "4CAF50").opacity(0.12)      // green
+    // Glass tint colors (for Liquid Glass effect — very subtle, near-white)
+    static let glassDefaultTint = Color.white.opacity(0.6)                     // near-white base
+    static let glassMoodTint = Color.claudeAccent.opacity(0.06)                // faint terracotta
+    static let glassHabitTint = Color(hex: "FF6B35").opacity(0.05)             // faint orange
+    static let glassHealthTint = Color(hex: "7B68EE").opacity(0.05)            // faint purple
+    static let glassLetterTint = Color.claudeAccent.opacity(0.05)              // faint envelope
+    static let glassMemoryTint = Color(hex: "7B68EE").opacity(0.04)            // faint purple
+    static let glassSuccessTint = Color(hex: "4CAF50").opacity(0.04)           // faint green
 
     init(hex: String) {
         let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)

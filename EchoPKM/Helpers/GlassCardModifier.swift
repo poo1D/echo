@@ -14,6 +14,7 @@ struct GlassCardModifier: ViewModifier {
                     .regular.tint(tint ?? Color.glassDefaultTint),
                     in: .rect(cornerRadius: cornerRadius)
                 )
+                .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
         } else {
             content
                 .background(Color.claudeCardBg)
@@ -35,6 +36,7 @@ struct GlassCardCompactModifier: ViewModifier {
                     .regular.tint(tint ?? Color.glassDefaultTint),
                     in: .rect(cornerRadius: cornerRadius)
                 )
+                .shadow(color: .black.opacity(0.05), radius: 6, y: 3)
         } else {
             content
                 .background(tint?.opacity(0.3) ?? Color.claudeCardBg)
@@ -88,6 +90,7 @@ struct GlassCapsuleModifier: ViewModifier {
             content
                 .background(.clear)
                 .glassEffect(.regular, in: .capsule)
+                .shadow(color: .black.opacity(0.05), radius: 6, y: 3)
         } else {
             content
                 .background(.ultraThinMaterial)
@@ -104,6 +107,7 @@ struct GlassCircleModifier: ViewModifier {
             content
                 .background(.clear)
                 .glassEffect(.regular, in: .circle)
+                .shadow(color: .black.opacity(0.06), radius: 6, y: 3)
         } else {
             content
                 .background(.ultraThinMaterial, in: Circle())

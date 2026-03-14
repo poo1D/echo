@@ -76,7 +76,7 @@ struct MoodTrendCard: View {
             }
         }
         .padding(12)
-        .glassCardCompact(tint: trendColor.opacity(0.15))
+        .glassCardCompact(tint: trendColor.opacity(0.05))
     }
 
     private var trendIcon: String {
@@ -144,7 +144,7 @@ struct ScheduleConfirmCard: View {
             }
         }
         .padding(12)
-        .glassCardCompact(tint: Color(hex: "4A90D9").opacity(0.12))
+        .glassCardCompact(tint: Color(hex: "4A90D9").opacity(0.04))
     }
 }
 
@@ -222,7 +222,7 @@ struct PatternInsightCard: View {
             }
         }
         .padding(12)
-        .glassCardCompact(tint: Color(hex: "FFB347").opacity(0.12))
+        .glassCardCompact(tint: Color(hex: "FFB347").opacity(0.04))
     }
 }
 
