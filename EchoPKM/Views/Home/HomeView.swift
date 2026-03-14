@@ -62,12 +62,11 @@ struct HomeView: View {
             // Save as Diary button
             if hasUserMessages && !pipeline.isRunning && !autoSaveService.isSaving {
                 Button(action: manualSave) {
-                    Label("Save as Diary", systemImage: "book.closed")
+                    Label("保存到日记", systemImage: "book.closed")
                         .font(.caption.weight(.medium))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Capsule())
+                        .modifier(GlassCapsuleModifier())
                 }
                 .padding(.trailing, 16)
                 .padding(.top, 8)
@@ -78,20 +77,19 @@ struct HomeView: View {
                 HStack(spacing: 6) {
                     ProgressView()
                         .scaleEffect(0.7)
-                    Text("Saving...")
+                    Text("保存中...")
                         .font(.caption.weight(.medium))
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
-                .background(.ultraThinMaterial)
-                .clipShape(Capsule())
+                .modifier(GlassCapsuleModifier())
                 .padding(.trailing, 16)
                 .padding(.top, 8)
             }
 
             // Toast confirmation
             if showSaveConfirmation {
-                Text("Saved to Diary")
+                Text("已保存到日记")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 16)
@@ -279,16 +277,16 @@ struct HomeView: View {
             for schedule in result.action.schedules {
                 feedItems.append(.actionConfirm(ActionConfirmData(
                     actionType: .scheduleCreated,
-                    title: "Schedule added",
-                    detail: "\(schedule.title) on \(schedule.date.formatted(date: .abbreviated, time: .omitted))",
+                    title: "已添加日程",
+                    detail: "\(schedule.title) \(schedule.date.formatted(date: .abbreviated, time: .omitted))",
                     isExecuted: true
                 )))
             }
             for habit in result.action.habits {
                 feedItems.append(.actionConfirm(ActionConfirmData(
                     actionType: .habitLogged,
-                    title: "Habit logged",
-                    detail: "\(habit.capitalized) recorded for today",
+                    title: "习惯已记录",
+                    detail: "今日已记录 \(habit.capitalized)",
                     isExecuted: true
                 )))
             }

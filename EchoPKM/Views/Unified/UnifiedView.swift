@@ -32,23 +32,11 @@ struct UnifiedView: View {
                             entries: Array(entries),
                             habits: Array(allHabits)
                         ),
-                        proactiveCards: proactiveCards,
+                        averageMoodAtmosphere: todayMoodAtmosphere,
                         onTapEcho: {
                             showConversation = true
-                        },
-                        onQuickAction: handleQuickAction
+                        }
                     )
-
-                    // Gradient fade
-                    Rectangle()
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.claudeBackground.opacity(0), Color.claudeBackground],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .frame(height: 20)
 
                     // Diary timeline
                     DiaryTimelineSection(
@@ -72,14 +60,25 @@ struct UnifiedView: View {
                 Text(todayMoodEmoji ?? "😊")
                     .font(.system(size: 24))
                     .frame(width: 44, height: 44)
-                    .background(.ultraThinMaterial, in: Circle())
+                    .modifier(GlassCircleModifier())
                     .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
             }
             .buttonStyle(.plain)
             .padding(.trailing, 16)
             .padding(.top, 8)
         }
-        .background(Color.claudeBackground)
+        .background(
+            LinearGradient(
+                stops: [
+                    Gradient.Stop(color: todayMoodAtmosphere.gradient.first ?? Color.claudeSurfaceTint, location: 0),
+                    Gradient.Stop(color: Color.claudeBackground, location: 0.25)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+            .animation(.easeInOut(duration: 1.5), value: todayMoodAtmosphere)
+        )
         .fullScreenCover(isPresented: $showConversation) {
             ConversationView(
                 petState: petState,
@@ -106,17 +105,17 @@ struct UnifiedView: View {
                 selectedTags: $selectedTags
             )
         }
-        .alert("Delete Entry?", isPresented: $showDeleteConfirmation) {
-            Button("Delete", role: .destructive) {
+        .alert("删除条目？", isPresented: $showDeleteConfirmation) {
+            Button("删除", role: .destructive) {
                 if let entry = entryToDelete {
                     deleteEntry(entry)
                 }
             }
-            Button("Cancel", role: .cancel) {
+            Button("取消", role: .cancel) {
                 entryToDelete = nil
             }
         } message: {
-            Text("This will permanently delete this diary entry and its associated files.")
+            Text("这将永久删除此日记条目及其关联文件。")
         }
         .sheet(isPresented: $showMoodPicker) {
             MoodPickerPopover(
@@ -131,48 +130,6 @@ struct UnifiedView: View {
         }
     }
 
-    // MARK: - Proactive Cards
-
-    private var proactiveCards: [ProactiveCardData] {
-        var cards: [ProactiveCardData] = []
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-
-        // Today's schedules
-        let todaySchedules = allSchedules.filter { !$0.isCompleted && calendar.isDate($0.date, inSameDayAs: today) }
-        for schedule in todaySchedules.prefix(2) {
-            let timeStr = schedule.date.formatted(date: .omitted, time: .shortened)
-            cards.append(ProactiveCardData(
-                icon: "calendar",
-                iconColor: "4A90D9",
-                title: schedule.title,
-                subtitle: "Today at \(timeStr)",
-                type: .schedule
-            ))
-        }
-
-        // Habit streaks
-        let weekStart = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date()))!
-        let thisWeekHabits = allHabits.filter { $0.date >= weekStart }
-        var habitDays: [String: Set<Int>] = [:]
-        for h in thisWeekHabits {
-            let dayOfWeek = calendar.component(.weekday, from: h.date)
-            habitDays[h.name, default: []].insert(dayOfWeek)
-        }
-        for (name, days) in habitDays where days.count >= 3 {
-            let emoji = HabitStreakData.emojiFor(name)
-            cards.append(ProactiveCardData(
-                icon: "flame.fill",
-                iconColor: "FF6B35",
-                title: "\(emoji) \(name.capitalized) \(days.count)d",
-                subtitle: "Keep it up!",
-                type: .habit
-            ))
-        }
-
-        return Array(cards.prefix(4))
-    }
-
     // MARK: - All Topics
 
     private var allTopics: [String] {
@@ -183,37 +140,17 @@ struct UnifiedView: View {
         return topics.sorted()
     }
 
-    // MARK: - Quick Actions
-
-    private func handleQuickAction(_ card: ProactiveCardData) {
-        switch card.type {
-        case .schedule:
-            // Mark the matching schedule as completed
-            let calendar = Calendar.current
-            let today = calendar.startOfDay(for: Date())
-            if let schedule = allSchedules.first(where: {
-                !$0.isCompleted && $0.title == card.title && calendar.isDate($0.date, inSameDayAs: today)
-            }) {
-                schedule.isCompleted = true
-                try? modelContext.save()
-            }
-        case .habit:
-            // Log habit for today
-            let habitName = card.title
-                .replacingOccurrences(of: "\\p{So}", with: "", options: .regularExpression)
-                .trimmingCharacters(in: .whitespaces)
-                .components(separatedBy: " ").first?.lowercased() ?? ""
-            if !habitName.isEmpty {
-                let habit = HabitEntry(name: habitName, date: Date())
-                modelContext.insert(habit)
-                try? modelContext.save()
-            }
-        default:
-            break
-        }
-    }
-
     // MARK: - Load Today's Mood
+
+    private var todayMoodAtmosphere: MoodAtmosphere {
+        let calendar = Calendar.current
+        let todayStart = calendar.startOfDay(for: Date())
+        let todayEntries = entries.filter { $0.createdAt >= todayStart }
+        let scores = todayEntries.compactMap(\.moodScore)
+        guard !scores.isEmpty else { return .neutral }
+        let avg = scores.reduce(0, +) / scores.count
+        return MoodAtmosphere.from(moodScore: avg)
+    }
 
     private func loadTodayMood() {
         let calendar = Calendar.current

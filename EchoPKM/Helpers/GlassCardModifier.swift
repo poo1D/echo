@@ -79,3 +79,34 @@ struct GlassEffectContainerModifier: ViewModifier {
         content
     }
 }
+
+// MARK: - Glass Capsule Modifier
+
+struct GlassCapsuleModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content
+                .background(.clear)
+                .glassEffect(.regular, in: .capsule)
+        } else {
+            content
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
+        }
+    }
+}
+
+// MARK: - Glass Circle Modifier
+
+struct GlassCircleModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content
+                .background(.clear)
+                .glassEffect(.regular, in: .circle)
+        } else {
+            content
+                .background(.ultraThinMaterial, in: Circle())
+        }
+    }
+}

@@ -20,6 +20,7 @@ struct ConversationView: View {
     @State private var pipeline = MultiAgentPipeline()
     @State private var greetingService = ProactiveGreetingService()
     @State private var ragService = RAGService()
+    @State private var healthService = HealthKitService()
 
     @State private var feedItems: [FeedItem] = []
     @State private var inputText = ""
@@ -27,6 +28,8 @@ struct ConversationView: View {
     @State private var scrollProxy: ScrollViewProxy?
     @State private var showSaveConfirmation = false
     @State private var hasLoadedProactive = false
+    @State private var moodAtmosphere: MoodAtmosphere = .neutral
+    @State private var healthSnapshot: HealthSnapshot?
 
     var petState: PetState
     var dismiss: () -> Void
@@ -42,8 +45,6 @@ struct ConversationView: View {
                     // Feed
                     feedSection
 
-                    Divider()
-
                     // Multimodal input
                     MultimodalInputBar(
                         text: $inputText,
@@ -55,27 +56,34 @@ struct ConversationView: View {
                         onSend: sendMessage
                     )
                 }
-                .background(Color.claudeBackground)
+                .background(
+                    LinearGradient(
+                        colors: moodAtmosphere.gradient,
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .ignoresSafeArea()
+                    .animation(.easeInOut(duration: 1.5), value: moodAtmosphere)
+                )
 
                 // Saving indicator
                 if autoSaveService.isSaving {
                     HStack(spacing: 6) {
                         ProgressView()
                             .scaleEffect(0.7)
-                        Text("Saving...")
+                        Text("保存中...")
                             .font(.caption.weight(.medium))
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 7)
-                    .background(.ultraThinMaterial)
-                    .clipShape(Capsule())
+                    .modifier(GlassCapsuleModifier())
                     .padding(.trailing, 16)
                     .padding(.top, 8)
                 }
 
                 // Toast confirmation
                 if showSaveConfirmation {
-                    Text("Saved to Diary")
+                    Text("已保存到日记")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 16)
@@ -87,9 +95,13 @@ struct ConversationView: View {
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
-            .navigationTitle("Echo")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("Echo")
+                        .font(.yuanti(20, weight: .bold))
+                }
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
                         dismiss()
@@ -102,7 +114,7 @@ struct ConversationView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     if hasUserMessages && !pipeline.isRunning && !autoSaveService.isSaving {
                         Button(action: manualSave) {
-                            Label("Save", systemImage: "book.closed")
+                            Label("保存", systemImage: "book.closed")
                                 .font(.caption.weight(.medium))
                         }
                         .foregroundStyle(Color.claudeAccent)
@@ -111,7 +123,11 @@ struct ConversationView: View {
             }
         }
         .onAppear {
-            Task { await speechService.requestPermissions() }
+            Task {
+                await speechService.requestPermissions()
+                await healthService.requestAuthorization()
+                healthSnapshot = await healthService.buildSnapshot()
+            }
             loadProactiveCards()
             ragService.loadIndex()
             if ragService.indexCount == 0, !recentEntries.isEmpty {
@@ -191,6 +207,14 @@ struct ConversationView: View {
         let userMsg = ChatService.Message(role: .user, content: text, photoFileNames: photoFileNames, videoFileNames: videoFileNames)
         chatService.messages.append(userMsg)
 
+        // Intent routing
+        let router = IntentRouter()
+        let agentSelection = router.route(
+            message: text,
+            hasMedia: !photoFileNames.isEmpty || !videoFileNames.isEmpty,
+            healthAuthorized: healthService.isAuthorized
+        )
+
         // Pet reacts to user message
         petState.react(to: text)
         petState.reactToPipeline(.agentsRunning)
@@ -213,7 +237,7 @@ struct ConversationView: View {
         let assistantIndex = feedItems.count
         feedItems.append(.assistantMessage(AssistantMessageData()))
 
-        // 4. Run Multi-Agent Pipeline
+        // 4. Run Multi-Agent Pipeline with intent routing
         Task {
             let result = await pipeline.process(
                 userMessage: text,
@@ -227,6 +251,8 @@ struct ConversationView: View {
                 modelContext: modelContext,
                 chatService: chatService,
                 ragService: ragService,
+                agentSelection: agentSelection,
+                healthSnapshot: healthSnapshot,
                 onSynthesisDelta: { delta in
                     // Update pipeline snapshot in real-time
                     if pipelineIndex < feedItems.count {
@@ -260,6 +286,18 @@ struct ConversationView: View {
             // Also store assistant response in chatService for save compatibility
             chatService.messages.append(ChatService.Message(role: .assistant, content: result.response))
 
+            // Update mood atmosphere based on emotion result
+            withAnimation(.easeInOut(duration: 1.5)) {
+                moodAtmosphere = MoodAtmosphere.from(moodScore: result.emotion.moodScore)
+            }
+
+            // Update pet accessories
+            petState.updateAccessories(
+                from: text,
+                moodScore: result.emotion.moodScore,
+                hour: Calendar.current.component(.hour, from: Date())
+            )
+
             // Pet reacts to completion
             petState.reactToPipeline(.completed)
 
@@ -267,16 +305,16 @@ struct ConversationView: View {
             for schedule in result.action.schedules {
                 feedItems.append(.actionConfirm(ActionConfirmData(
                     actionType: .scheduleCreated,
-                    title: "Schedule added",
-                    detail: "\(schedule.title) on \(schedule.date.formatted(date: .abbreviated, time: .omitted))",
+                    title: "已添加日程",
+                    detail: "\(schedule.title) \(schedule.date.formatted(date: .abbreviated, time: .omitted))",
                     isExecuted: true
                 )))
             }
             for habit in result.action.habits {
                 feedItems.append(.actionConfirm(ActionConfirmData(
                     actionType: .habitLogged,
-                    title: "Habit logged",
-                    detail: "\(habit.capitalized) recorded for today",
+                    title: "习惯已记录",
+                    detail: "今日已记录 \(habit.capitalized)",
                     isExecuted: true
                 )))
             }

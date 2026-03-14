@@ -19,12 +19,16 @@ struct DiaryView: View {
                     timeline
                 }
             }
-            .navigationTitle("Diary")
+            .background { WarmGradientBackground() }
+            .navigationTitle("日记")
             .sheet(item: $selectedEntry) { entry in
                 JournalDetailSheet(entry: entry) { entryToRemove in
                     entryToDelete = entryToRemove
                     showDeleteConfirmation = true
                 }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(.regularMaterial)
             }
             .sheet(item: $editingEntry) { entry in
                 EditEntrySheet(entry: entry) {
@@ -32,17 +36,17 @@ struct DiaryView: View {
                     showDeleteConfirmation = true
                 }
             }
-            .alert("Delete Entry?", isPresented: $showDeleteConfirmation) {
-                Button("Delete", role: .destructive) {
+            .alert("删除条目？", isPresented: $showDeleteConfirmation) {
+                Button("删除", role: .destructive) {
                     if let entry = entryToDelete {
                         deleteEntry(entry)
                     }
                 }
-                Button("Cancel", role: .cancel) {
+                Button("取消", role: .cancel) {
                     entryToDelete = nil
                 }
             } message: {
-                Text("This will permanently delete this diary entry and its associated files.")
+                Text("这将永久删除此日记条目及其关联文件。")
             }
         }
     }
@@ -54,10 +58,10 @@ struct DiaryView: View {
             Image(systemName: "book.closed")
                 .font(.system(size: 48))
                 .foregroundStyle(.tertiary)
-            Text("No entries yet")
-                .font(.headline)
+            Text("还没有记录")
+                .font(.yuantiHeadline)
                 .foregroundStyle(.secondary)
-            Text("Start talking to Echo on the Home tab.\nConversations auto-save as diary entries.")
+            Text("在首页和Echo聊天吧~\n对话会自动保存为日记。")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
@@ -84,19 +88,19 @@ struct DiaryView: View {
                                     Button {
                                         editingEntry = entry
                                     } label: {
-                                        Label("Edit", systemImage: "pencil")
+                                        Label("编辑", systemImage: "pencil")
                                     }
                                     Button(role: .destructive) {
                                         entryToDelete = entry
                                         showDeleteConfirmation = true
                                     } label: {
-                                        Label("Delete", systemImage: "trash")
+                                        Label("删除", systemImage: "trash")
                                     }
                                 }
                         }
                     } header: {
                         Text(daySectionTitle(day))
-                            .font(.title3.weight(.bold))
+                            .font(.yuantiTitle3)
                             .foregroundStyle(.primary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal)
@@ -118,10 +122,11 @@ struct DiaryView: View {
     }
 
     private func daySectionTitle(_ date: Date) -> String {
-        if Calendar.current.isDateInToday(date) { return "Today" }
-        if Calendar.current.isDateInYesterday(date) { return "Yesterday" }
+        if Calendar.current.isDateInToday(date) { return "今天" }
+        if Calendar.current.isDateInYesterday(date) { return "昨天" }
         let formatter = DateFormatter()
-        formatter.dateFormat = "EEEE, MMMM d, yyyy"
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "EEEE, M月d日, yyyy"
         return formatter.string(from: date)
     }
 
