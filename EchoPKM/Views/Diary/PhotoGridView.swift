@@ -41,7 +41,7 @@ struct PhotoGridView: View {
                                         .fill(.black.opacity(0.4))
                                         .frame(height: 120)
                                     Text("+\(count - 4)")
-                                        .font(.title2.weight(.semibold))
+                                        .font(.yuanti(22, weight: .semibold))
                                         .foregroundStyle(.white)
                                 }
                             }

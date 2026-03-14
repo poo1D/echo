@@ -10,7 +10,7 @@ struct JournalDetailSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 20) {
                     // 1. Photo grid
                     if !entry.photoFileNames.isEmpty {
                         PhotoGridView(photoFileNames: entry.photoFileNames)
@@ -28,7 +28,7 @@ struct JournalDetailSheet: View {
 
                     // 3. Summary text (full, no truncation)
                     Text(entry.summary)
-                        .font(.body)
+                        .font(.yuantiBody)
                         .foregroundStyle(.primary)
 
                     // 4. Mood + time + location row
@@ -39,7 +39,7 @@ struct JournalDetailSheet: View {
                         }
 
                         Text(entry.createdAt.formatted(date: .omitted, time: .shortened))
-                            .font(.caption)
+                            .font(.yuantiCaption)
                             .foregroundStyle(.secondary)
 
                         if let loc = entry.locationName {
@@ -47,7 +47,7 @@ struct JournalDetailSheet: View {
                                 Image(systemName: "mappin")
                                     .font(.caption2)
                                 Text(loc)
-                                    .font(.caption)
+                                    .font(.yuantiCaption)
                                     .lineLimit(1)
                             }
                             .foregroundStyle(.secondary)
@@ -61,7 +61,7 @@ struct JournalDetailSheet: View {
                         FlowLayout(spacing: 8) {
                             ForEach(entry.topics, id: \.self) { topic in
                                 Text(topic)
-                                    .font(.caption2)
+                                    .font(.yuantiCaption2)
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 3)
                                     .background(Color.blue.opacity(0.08))
@@ -78,7 +78,7 @@ struct JournalDetailSheet: View {
                                 .font(.caption)
                                 .foregroundStyle(.purple)
                             Text(insight)
-                                .font(.callout)
+                                .font(.yuantiCallout)
                                 .foregroundStyle(.secondary)
                         }
                         .padding()
@@ -87,8 +87,6 @@ struct JournalDetailSheet: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
 
-                    Divider()
-
                     // 7. View Conversation link
                     NavigationLink {
                         TranscriptReplayView(entry: entry)
@@ -96,8 +94,8 @@ struct JournalDetailSheet: View {
                         HStack {
                             Image(systemName: "bubble.left.and.bubble.right")
                                 .font(.body)
-                            Text("View Conversation")
-                                .font(.body)
+                            Text("查看对话")
+                                .font(.yuantiBody)
                             Spacer()
                             Image(systemName: "chevron.right")
                                 .font(.caption)
@@ -107,16 +105,19 @@ struct JournalDetailSheet: View {
                         .padding(.vertical, 4)
                     }
                 }
-                .padding()
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 20)
             }
-            .navigationTitle("Entry")
+            .background(Color.clear)
+            .navigationTitle("条目")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+                    Button("完成") { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Edit") { showingEditSheet = true }
+                    Button("编辑") { showingEditSheet = true }
                 }
             }
             .sheet(isPresented: $showingEditSheet) {
@@ -139,7 +140,7 @@ private struct TranscriptReplayView: View {
             VStack(alignment: .leading, spacing: 12) {
                 let transcript = entry.decodedTranscript
                 if transcript.isEmpty {
-                    Text("No transcript recorded")
+                    Text("暂无对话记录")
                         .foregroundStyle(.tertiary)
                         .padding()
                 } else {
@@ -178,7 +179,7 @@ private struct TranscriptReplayView: View {
                                     )
                                     .clipShape(RoundedRectangle(cornerRadius: 12))
                                     .shadow(color: .black.opacity(0.03), radius: 2, y: 1)
-                                    .font(.callout)
+                                    .font(.yuantiCallout)
                                 if msg.role == "assistant" { Spacer(minLength: 40) }
                             }
                         }
@@ -187,7 +188,7 @@ private struct TranscriptReplayView: View {
             }
             .padding()
         }
-        .navigationTitle("Conversation")
+        .navigationTitle("对话")
         .navigationBarTitleDisplayMode(.inline)
     }
 }

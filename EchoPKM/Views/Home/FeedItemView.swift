@@ -37,10 +37,10 @@ private struct ProactiveCardView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(data.title)
-                    .font(.subheadline.weight(.medium))
+                    .font(.yuanti(15, weight: .medium))
                     .foregroundStyle(.primary)
                 Text(data.subtitle)
-                    .font(.caption)
+                    .font(.yuantiCaption)
                     .foregroundStyle(.secondary)
             }
 
@@ -79,7 +79,7 @@ private struct UserBubbleView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 16))
                     .shadow(color: .black.opacity(0.03), radius: 2, y: 1)
                     .foregroundStyle(.primary)
-                    .font(.body)
+                    .font(.yuantiBody)
             }
         }
         .padding(.horizontal)
@@ -158,7 +158,7 @@ private struct StackedPhotosView: View {
             // Photo counter badge
             if total > 1 {
                 Text("\(topDisplayIndex + 1)/\(total)")
-                    .font(.caption2.weight(.semibold))
+                    .font(.yuanti(11, weight: .semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
@@ -285,7 +285,7 @@ struct AgentPipelineView: View {
                     Image(systemName: "target")
                         .font(.system(size: 11, weight: .semibold))
                     Text(intentType)
-                        .font(.caption.weight(.semibold))
+                        .font(.yuanti(12, weight: .semibold))
                 }
                 .foregroundStyle(Color.claudeAccent)
                 .padding(.horizontal, 12)
@@ -344,7 +344,7 @@ struct AgentPipelineView: View {
                                 .foregroundStyle(Color(hex: "4CAF50"))
                         } else {
                             Text("合成中")
-                                .font(.caption2)
+                                .font(.yuantiCaption2)
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -363,7 +363,7 @@ struct AgentPipelineView: View {
                     .foregroundStyle(statusColor(snapshot.ragStatus))
                 if case .completed(let summary) = snapshot.ragStatus {
                     Text(summary)
-                        .font(.caption2)
+                        .font(.yuantiCaption2)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -432,7 +432,7 @@ private struct AgentCircle: View {
                 // Content
                 if case .skipped = status {
                     Text("--")
-                        .font(.caption.weight(.medium))
+                        .font(.yuanti(12, weight: .medium))
                         .foregroundStyle(.gray.opacity(0.5))
                 } else if showCheck {
                     Image(systemName: "checkmark")
@@ -450,7 +450,7 @@ private struct AgentCircle: View {
             }
 
             Text(name)
-                .font(.caption2.weight(.medium))
+                .font(.yuanti(11, weight: .medium))
                 .foregroundStyle({
                     switch status {
                     case .skipped: return Color.secondary.opacity(0.5)
@@ -519,40 +519,34 @@ private struct ThinkingDotsView: View {
     }
 }
 
-// MARK: - Assistant Message (with Rich Cards)
+// MARK: - Assistant Message (with Rich Cards) — blue soft-glow bubble
 
 private struct AssistantMessageView: View {
     let data: AssistantMessageData
 
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            // AI avatar
-            Circle()
-                .fill(Color.claudeAccent)
-                .frame(width: 28, height: 28)
-                .overlay(
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
-                )
-                .padding(.top, 2)
+    // Echo blue palette
+    private let echoBubbleBg = Color(hex: "EFF4FF")       // very pale blue
+    private let echoGlowColor = Color(hex: "5B9CF6")      // soft blue for glow
 
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
                 // Rich content cards
                 ForEach(data.richCards) { card in
                     RichContentCardView(content: card)
                 }
 
-                // Text content
+                // Text content — pale blue bg + blue soft-glow shadow
                 if !data.textContent.isEmpty {
                     Text(data.textContent)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
-                        .background(Color.claudeAssistantBubble)
+                        .background(echoBubbleBg)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
-                        .shadow(color: .black.opacity(0.03), radius: 2, y: 1)
+                        .shadow(color: echoGlowColor.opacity(0.18), radius: 8, y: 2)
+                        .shadow(color: echoGlowColor.opacity(0.08), radius: 16, y: 4)
                         .foregroundStyle(.primary)
-                        .font(.body)
+                        .font(.yuantiBody)
                 }
             }
 
@@ -575,10 +569,10 @@ private struct ActionConfirmView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(data.title)
-                    .font(.caption.weight(.medium))
+                    .font(.yuanti(12, weight: .medium))
                     .foregroundStyle(.primary)
                 Text(data.detail)
-                    .font(.caption2)
+                    .font(.yuantiCaption2)
                     .foregroundStyle(.secondary)
             }
 

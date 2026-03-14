@@ -1,5 +1,65 @@
 import SwiftUI
 
+// MARK: - Pet Accessory System
+
+enum PetAccessory: String, CaseIterable, Hashable {
+    case umbrella       // rain / sad
+    case sunglasses     // happy / sunny
+    case sweatband      // exercise / workout
+    case sleepCap       // late night / tired
+    case musicNote      // music related
+    case book           // reading related
+    case heart          // low mood / care
+
+    var icon: String {
+        switch self {
+        case .umbrella: return "umbrella.fill"
+        case .sunglasses: return "eyeglasses"
+        case .sweatband: return "figure.run"
+        case .sleepCap: return "moon.zzz.fill"
+        case .musicNote: return "music.note"
+        case .book: return "book.fill"
+        case .heart: return "heart.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .umbrella: return Color(hex: "4A90D9")
+        case .sunglasses: return .black
+        case .sweatband: return .red
+        case .sleepCap: return Color(hex: "7B68EE")
+        case .musicNote: return Color(hex: "FF6B35")
+        case .book: return Color(hex: "8B4513")
+        case .heart: return Color(hex: "E8A0BF")
+        }
+    }
+
+    var offset: CGSize {
+        switch self {
+        case .umbrella: return CGSize(width: 25, height: -75)
+        case .sunglasses: return CGSize(width: 0, height: -28)
+        case .sweatband: return CGSize(width: 0, height: -48)
+        case .sleepCap: return CGSize(width: 15, height: -70)
+        case .musicNote: return CGSize(width: 30, height: -70)
+        case .book: return CGSize(width: -50, height: 5)
+        case .heart: return CGSize(width: 30, height: -55)
+        }
+    }
+
+    var fontSize: CGFloat {
+        switch self {
+        case .umbrella: return 22
+        case .sunglasses: return 16
+        case .sweatband: return 14
+        case .sleepCap: return 20
+        case .musicNote: return 18
+        case .book: return 16
+        case .heart: return 16
+        }
+    }
+}
+
 // MARK: - Pet State
 
 enum PetMood: String, CaseIterable {
@@ -20,6 +80,7 @@ enum PipelinePhase {
 class PetState {
     var mood: PetMood = .neutral
     var currentAnimation: PetAnimation = .idle
+    var accessories: Set<PetAccessory> = []
 
     func react(to message: String) {
         let lower = message.lowercased()
@@ -40,7 +101,9 @@ class PetState {
             currentAnimation = .nod
         }
 
-        // Reset to idle after animation plays
+        // Update accessories based on message content
+        updateAccessories(from: message, moodScore: mood == .happy ? 4 : (mood == .worried ? 2 : 3), hour: Calendar.current.component(.hour, from: Date()))
+
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(1.5))
             currentAnimation = .idle
@@ -63,6 +126,50 @@ class PetState {
                 currentAnimation = .idle
             }
         }
+    }
+
+    func updateAccessories(from message: String, moodScore: Int, hour: Int) {
+        let lower = message.lowercased()
+        var newAccessories = Set<PetAccessory>()
+
+        // Exercise / workout
+        if lower.contains("运动") || lower.contains("跑步") || lower.contains("健身") ||
+           lower.contains("exercise") || lower.contains("workout") || lower.contains("gym") ||
+           lower.contains("瑜伽") || lower.contains("yoga") {
+            newAccessories.insert(.sweatband)
+        }
+
+        // Music
+        if lower.contains("音乐") || lower.contains("music") || lower.contains("歌") || lower.contains("song") {
+            newAccessories.insert(.musicNote)
+        }
+
+        // Reading
+        if lower.contains("阅读") || lower.contains("看书") || lower.contains("read") || lower.contains("book") {
+            newAccessories.insert(.book)
+        }
+
+        // Late night / tired
+        if hour >= 22 || hour < 5 || lower.contains("困") || lower.contains("sleepy") || lower.contains("失眠") {
+            newAccessories.insert(.sleepCap)
+        }
+
+        // Happy / sunny
+        if moodScore >= 4 {
+            newAccessories.insert(.sunglasses)
+        }
+
+        // Sad / rain
+        if lower.contains("雨") || lower.contains("rain") || lower.contains("难过") || lower.contains("sad") {
+            newAccessories.insert(.umbrella)
+        }
+
+        // Low mood care
+        if moodScore <= 2 {
+            newAccessories.insert(.heart)
+        }
+
+        accessories = newAccessories
     }
 }
 
@@ -150,6 +257,15 @@ struct PetView: View {
                             .rotationEffect(.degrees(-15 - wingRotation))
                     }
                     .offset(y: 10)
+
+                    // Accessories overlay
+                    ForEach(Array(petState.accessories), id: \.self) { accessory in
+                        Image(systemName: accessory.icon)
+                            .font(.system(size: accessory.fontSize, weight: .semibold))
+                            .foregroundStyle(accessory.color)
+                            .offset(accessory.offset)
+                            .transition(.scale.combined(with: .opacity))
+                    }
                 }
                 .rotationEffect(.degrees(headTilt))
 
@@ -167,6 +283,7 @@ struct PetView: View {
         }
         .scaleEffect(breathScale)
         .offset(y: bounceOffset + jumpOffset)
+        .animation(.easeInOut(duration: 0.3), value: petState.accessories)
         .onAppear {
             startIdleAnimations()
         }
@@ -252,7 +369,6 @@ struct PetView: View {
             }
 
         case .searching:
-            // Head rotates left and right, looking around
             withAnimation(.easeInOut(duration: 0.3).repeatCount(6, autoreverses: true)) {
                 headTilt = 15
             }

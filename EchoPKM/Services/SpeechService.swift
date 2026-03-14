@@ -19,7 +19,8 @@ final class SpeechService {
     private var speechRecognizerLoaded = false
     private var speechRecognizer: SFSpeechRecognizer? {
         if !speechRecognizerLoaded {
-            _speechRecognizer = SFSpeechRecognizer()
+            // 强制使用简体中文识别器，若创建失败则降级到设备语言
+            _speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN")) ?? SFSpeechRecognizer()
             speechRecognizerLoaded = true
         }
         return _speechRecognizer
@@ -131,6 +132,9 @@ final class SpeechService {
         audioRecorder = nil
 
         isRecording = false
+
+        // Reset audio session so subsequent playback routes to speaker correctly
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     // MARK: - Audio Playback Helper

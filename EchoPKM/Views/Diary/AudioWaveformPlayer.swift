@@ -132,9 +132,12 @@ struct AudioWaveformPlayer: View {
     private func startPlayback() {
         let url = SpeechService.audioURL(for: fileName)
         do {
-            try AVAudioSession.sharedInstance().setCategory(.playback)
-            try AVAudioSession.sharedInstance().setActive(true)
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default)
+            try session.overrideOutputAudioPort(.speaker)
+            try session.setActive(true)
             player = try AVAudioPlayer(contentsOf: url)
+            player?.volume = 1.0
             player?.play()
             isPlaying = true
 

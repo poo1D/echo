@@ -399,6 +399,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Echo lets you take photos to include in your diary";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Echo uses your health data to provide personalized wellness insights in your diary";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Echo can tag your diary entries with your current location";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Echo uses your photos to add visual memories to your diary entries";
@@ -436,6 +437,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Echo lets you take photos to include in your diary";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Echo uses your health data to provide personalized wellness insights in your diary";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Echo can tag your diary entries with your current location";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Echo uses your photos to add visual memories to your diary entries";

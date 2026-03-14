@@ -18,7 +18,7 @@ struct TagFilterSheet: View {
                             }
                         } label: {
                             Text(topic)
-                                .font(.subheadline)
+                                .font(.yuantiSubheadline)
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 8)
                                 .background(
@@ -37,18 +37,18 @@ struct TagFilterSheet: View {
                 }
                 .padding()
             }
-            .navigationTitle("Filter by Topic")
+            .navigationTitle("按主题筛选")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Clear") {
+                    Button("清空") {
                         selectedTags.removeAll()
                     }
                     .foregroundStyle(Color.claudeAccent)
                     .disabled(selectedTags.isEmpty)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
+                    Button("完成") {
                         dismiss()
                     }
                     .fontWeight(.semibold)

@@ -74,11 +74,14 @@ struct PipelineSnapshot: Identifiable {
     var memoryStatus: AgentStatus = .idle
     var actionStatus: AgentStatus = .idle
     var synthesisStatus: AgentStatus = .idle
+    var healthStatus: AgentStatus = .idle
+    var intentType: String?
 
     enum AgentStatus: Equatable {
         case idle
         case running
         case completed(String)  // summary text
+        case skipped            // agent not needed for this intent
         case failed
     }
 }

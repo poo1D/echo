@@ -331,8 +331,14 @@ final class ChatService {
           "summary": "2-3 sentence diary summary of what the user talked about",
           "mood_emoji": "single emoji representing overall mood",
           "mood_score": <1-5 integer, 1=very sad, 5=very happy>,
-          "topics": ["topic1", "topic2"]
+          "topics": ["tag1", "tag2"]
         }
+
+        topics 规则（严格遵守）：
+        - 只能从以下标签池中选择，禁止自创标签：
+        \(TopicTagService.tagListForPrompt)
+        - 最多选 3 个最相关的标签
+        - 按相关度从高到低排列
 
         Conversation:
         \(conversation)
@@ -366,11 +372,12 @@ final class ChatService {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 if let jsonData = cleaned.data(using: .utf8),
                    let result = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
+                    let rawTopics = result["topics"] as? [String] ?? []
                     return SessionSummary(
                         summary: result["summary"] as? String ?? "Conversation with Echo",
                         moodEmoji: result["mood_emoji"] as? String ?? "😊",
                         moodScore: result["mood_score"] as? Int ?? 3,
-                        topics: result["topics"] as? [String] ?? []
+                        topics: TopicTagService.normalize(rawTopics)
                     )
                 }
             }
@@ -576,18 +583,24 @@ final class ChatService {
 
     private func mockResponse(for input: String) -> String {
         let lower = input.lowercased()
-        if lower.contains("stress") || lower.contains("tired") || lower.contains("exhausted") {
-            return "That sounds really tough 💙 Have you tried stepping away for even 5 minutes? A short walk or some fresh air can help reset. What's weighing on you most right now?"
+        if lower.contains("领导") || lower.contains("批评") || lower.contains("被说") || lower.contains("开会") || lower.contains("职场") {
+            return "被否定的感觉真的不好受，尤其是当众的时候 💙 但你愿意说出来，已经是在消化它了。你有没有想到，这次能学到什么？"
         }
-        if lower.contains("happy") || lower.contains("great") || lower.contains("good") {
-            return "That's wonderful to hear! 🌟 What made it so good? I want to remember this so we can spot what lights you up."
+        if lower.contains("加班") || lower.contains("累") || lower.contains("压力") || lower.contains("焦虑") || lower.contains("睡不着") {
+            return "最近这根弦绷得有点紧了 🌙 有时候身体比我们先发现——你今天有没有做过什么让自己放松的事，哪怕五分钟？"
         }
-        if lower.contains("work") || lower.contains("boss") || lower.contains("deadline") {
-            return "Work pressure is real 💪 One thing that might help: try breaking it into the smallest next step. What's the one thing you could tackle first?"
+        if lower.contains("开心") || lower.contains("好消息") || lower.contains("成功") || lower.contains("通过") || lower.contains("棒") {
+            return "听到这个我也替你开心！🌟 能说说是什么事吗？我想把这个好时刻好好记下来。"
         }
-        if lower.contains("exercise") || lower.contains("gym") || lower.contains("run") {
-            return "Nice! Moving your body is such a mood booster 🏃 How did you feel afterwards compared to before?"
+        if lower.contains("跑步") || lower.contains("运动") || lower.contains("健身") || lower.contains("锻炼") {
+            return "动起来就是对自己最好的投资 💪 运动完和运动前比，心情有没有不一样？"
         }
-        return "I hear you! Tell me more about what's going on — and let's figure out together if there's something small you could try today ☀️"
+        if lower.contains("阅读") || lower.contains("看书") || lower.contains("读书") {
+            return "读到什么好东西了吗？📖 有时候一句话就能让整个人平静下来，你最近有没有这样的句子？"
+        }
+        if lower.contains("难过") || lower.contains("低落") || lower.contains("不想") || lower.contains("很烦") {
+            return "心情不好的时候，说出来就已经好一点了 🫂 你现在是什么感觉——是烦、累，还是有点空空的？"
+        }
+        return "嗯，我在听 🐧 继续说——你今天脑子里一直转的是什么事？"
     }
 }

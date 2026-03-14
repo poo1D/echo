@@ -52,34 +52,48 @@ extension Color {
     }
 }
 
-// MARK: - Yuanti (圆体) Font Helpers
+// MARK: - PingFang SC (苹方-简) Font Helpers
 
 extension Font {
-    /// 大标题 — YuantiSC Bold 22pt
-    static let yuantiTitle = Font.custom("YuantiSC-Bold", size: 22)
-    /// 标题 — YuantiSC Bold 20pt
-    static let yuantiTitle3 = Font.custom("YuantiSC-Bold", size: 20)
-    /// 小节标题 — YuantiSC Bold 17pt
-    static let yuantiHeadline = Font.custom("YuantiSC-Bold", size: 17)
-    /// 副标题 — YuantiSC Regular 15pt
-    static let yuantiSubheadline = Font.custom("YuantiSC-Regular", size: 15)
-    /// 正文 — YuantiSC Regular 17pt
-    static let yuantiBody = Font.custom("YuantiSC-Regular", size: 17)
-    /// 小字 — YuantiSC Regular 12pt
-    static let yuantiCaption = Font.custom("YuantiSC-Regular", size: 12)
-    /// 更小字 — YuantiSC Regular 11pt
-    static let yuantiCaption2 = Font.custom("YuantiSC-Regular", size: 11)
+    /// 超大标题 — 苹方 Semibold 34pt
+    static let yuantiLargeTitle = Font.custom("PingFangSC-Semibold", size: 34)
+    /// 大标题 — 苹方 Semibold 28pt
+    static let yuantiTitle = Font.custom("PingFangSC-Semibold", size: 28)
+    /// 标题2 — 苹方 Semibold 22pt
+    static let yuantiTitle2 = Font.custom("PingFangSC-Semibold", size: 22)
+    /// 标题3 — 苹方 Semibold 20pt
+    static let yuantiTitle3 = Font.custom("PingFangSC-Semibold", size: 20)
+    /// 小节标题 — 苹方 Semibold 17pt
+    static let yuantiHeadline = Font.custom("PingFangSC-Semibold", size: 17)
+    /// 副标题 — 苹方 Regular 15pt
+    static let yuantiSubheadline = Font.custom("PingFangSC-Regular", size: 15)
+    /// 正文 — 苹方 Regular 17pt
+    static let yuantiBody = Font.custom("PingFangSC-Regular", size: 17)
+    /// 标注 — 苹方 Regular 16pt
+    static let yuantiCallout = Font.custom("PingFangSC-Regular", size: 16)
+    /// 脚注 — 苹方 Regular 13pt
+    static let yuantiFootnote = Font.custom("PingFangSC-Regular", size: 13)
+    /// 小字 — 苹方 Regular 12pt
+    static let yuantiCaption = Font.custom("PingFangSC-Regular", size: 12)
+    /// 更小字 — 苹方 Regular 11pt
+    static let yuantiCaption2 = Font.custom("PingFangSC-Regular", size: 11)
 
-    /// 自定义大小的圆体
+    /// 自定义大小的苹方
     static func yuanti(_ size: CGFloat, weight: YuantiWeight = .regular) -> Font {
-        switch weight {
-        case .light: return .custom("YuantiSC-Light", size: size)
-        case .regular: return .custom("YuantiSC-Regular", size: size)
-        case .bold: return .custom("YuantiSC-Bold", size: size)
-        }
+        return .custom(weight.fontName, size: size)
     }
 
     enum YuantiWeight {
-        case light, regular, bold
+        case light, regular, medium, semibold, bold
+
+        var fontName: String {
+            switch self {
+            case .light: return "PingFangSC-Light"
+            case .regular: return "PingFangSC-Regular"
+            case .medium: return "PingFangSC-Medium"
+            case .semibold: return "PingFangSC-Semibold"
+            case .bold: return "PingFangSC-Semibold"
+            }
+        }
     }
 }

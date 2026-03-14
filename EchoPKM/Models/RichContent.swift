@@ -8,6 +8,7 @@ enum RichContent: Identifiable {
     case scheduleConfirm(ScheduleConfirmData)
     case habitStreak(HabitStreakData)
     case patternInsight(PatternInsightData)
+    case healthInsight(HealthInsightData)
 
     var id: String {
         switch self {
@@ -16,6 +17,7 @@ enum RichContent: Identifiable {
         case .scheduleConfirm(let d): return "schedule-\(d.id)"
         case .habitStreak(let d): return "habit-\(d.id)"
         case .patternInsight(let d): return "pattern-\(d.id)"
+        case .healthInsight(let d): return "health-\(d.id)"
         }
     }
 }
@@ -111,4 +113,28 @@ struct PatternInsightData: Identifiable {
     let pattern: String     // e.g., "Exercise improves your mood"
     let evidence: String    // e.g., "Mood is 4.2/5 on exercise days vs 2.8/5 on others"
     let occurrences: Int
+}
+
+// MARK: - Health Insight
+
+struct HealthInsightData: Identifiable {
+    let id = UUID()
+    let type: HealthInsightType
+    let title: String
+    let detail: String
+    let correlation: String?
+
+    enum HealthInsightType: String {
+        case sleepMood = "sleepMood"
+        case exerciseBoost = "exerciseBoost"
+        case stepGoal = "stepGoal"
+        case sleepWarning = "sleepWarning"
+    }
+
+    init(type: HealthInsightType, title: String, detail: String, correlation: String? = nil) {
+        self.type = type
+        self.title = title
+        self.detail = detail
+        self.correlation = correlation
+    }
 }

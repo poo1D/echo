@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-/// Orchestrates 4 independent LLM Agents: 3 parallel analysis + 1 streaming synthesis
+/// Orchestrates dynamic LLM Agents: intent-routed parallel analysis + streaming synthesis
 @Observable @MainActor
 final class MultiAgentPipeline {
 
@@ -12,17 +12,23 @@ final class MultiAgentPipeline {
         let intensity: Int
         let moodScore: Int
         let needs: [String]
+
+        static let empty = EmotionResult(emotion: "neutral", intensity: 3, moodScore: 3, needs: [])
     }
 
     struct MemoryResult {
         let relevant: [(date: Date, summary: String, moodEmoji: String?, reason: String)]
         let patterns: [String]
+
+        static let empty = MemoryResult(relevant: [], patterns: [])
     }
 
     struct ActionResult {
         let schedules: [ExtractedSchedule]
         let habits: [String]
         let goals: [String]
+
+        static let empty = ActionResult(schedules: [], habits: [], goals: [])
     }
 
     struct ExtractedSchedule {
@@ -38,6 +44,7 @@ final class MultiAgentPipeline {
         let response: String
         let richCards: [RichContent]
         let ragResults: [RAGService.RAGResult]
+        let intentType: String?
     }
 
     // MARK: - Pipeline State (drives UI updates)
@@ -46,7 +53,9 @@ final class MultiAgentPipeline {
     var emotionStatus: PipelineSnapshot.AgentStatus = .idle
     var memoryStatus: PipelineSnapshot.AgentStatus = .idle
     var actionStatus: PipelineSnapshot.AgentStatus = .idle
+    var healthStatus: PipelineSnapshot.AgentStatus = .idle
     var synthesisStatus: PipelineSnapshot.AgentStatus = .idle
+    var currentIntentType: String?
     var isRunning = false
 
     var snapshot: PipelineSnapshot {
@@ -55,11 +64,13 @@ final class MultiAgentPipeline {
             emotionStatus: emotionStatus,
             memoryStatus: memoryStatus,
             actionStatus: actionStatus,
-            synthesisStatus: synthesisStatus
+            synthesisStatus: synthesisStatus,
+            healthStatus: healthStatus,
+            intentType: currentIntentType
         )
     }
 
-    // MARK: - Core Pipeline
+    // MARK: - Core Pipeline (Dynamic)
 
     func process(
         userMessage: String,
@@ -73,12 +84,24 @@ final class MultiAgentPipeline {
         modelContext: ModelContext,
         chatService: ChatService,
         ragService: RAGService,
+        agentSelection: IntentRouter.AgentSelection? = nil,
+        healthSnapshot: HealthSnapshot? = nil,
         onSynthesisDelta: @escaping (String) -> Void
     ) async -> PipelineResult {
         isRunning = true
         defer { isRunning = false }
 
-        // Build enriched message text (append location like old flow)
+        // Resolve agent selection (default: full pipeline)
+        let selection = agentSelection ?? IntentRouter.AgentSelection(
+            intent: .complexNarrative,
+            runEmotion: true,
+            runMemory: true,
+            runAction: true,
+            runHealth: false
+        )
+        currentIntentType = selection.intent.label
+
+        // Build enriched message text
         var enrichedMessage = userMessage
         if let loc = location {
             enrichedMessage += "\n[用户当前位置: \(loc.name)]"
@@ -97,7 +120,7 @@ final class MultiAgentPipeline {
         let ragDuration = CFAbsoluteTimeGetCurrent() - ragStartTime
         ragStatus = .completed("\(ragResults.count)条语义匹配 (\(String(format: "%.2fs", ragDuration)))")
 
-        // Build Memory Agent input from RAG results (not raw 20 entries)
+        // Build Memory Agent input from RAG results
         let ragEntrySummaries: [(String, String, String)] = ragResults.map { result in
             let dateStr = result.date.formatted(date: .abbreviated, time: .shortened)
             let mood = result.moodEmoji ?? ""
@@ -112,18 +135,75 @@ final class MultiAgentPipeline {
         for name in habitNames { habitCounts[name, default: 0] += 1 }
         let habitContextStr = habitCounts.map { "\($0.key): \($0.value) times this week" }.joined(separator: ", ")
 
-        // Phase 1: Three Agents in parallel (async let) with slight stagger to avoid 429
-        emotionStatus = .running
-        memoryStatus = .running
-        actionStatus = .running
+        // Phase 1: Dynamic Agent execution with TaskGroup
+        // Set skipped agents first
+        if !selection.runEmotion { emotionStatus = .skipped }
+        if !selection.runMemory { memoryStatus = .skipped }
+        if !selection.runAction { actionStatus = .skipped }
+        if !selection.runHealth { healthStatus = .skipped }
 
-        async let emotionTask = runEmotionAgent(enrichedMessage, chatService: chatService)
-        async let memoryTask = runMemoryAgentStaggered(enrichedMessage, entrySummaries: ragEntrySummaries, chatService: chatService)
-        async let actionTask = runActionAgentStaggered(enrichedMessage, habitContext: habitContextStr, chatService: chatService)
+        var emotion = EmotionResult.empty
+        var memory = MemoryResult.empty
+        var action = ActionResult.empty
 
-        let emotion = await emotionTask
-        let memory = await memoryTask
-        let action = await actionTask
+        // Use TaskGroup for dynamic parallel execution
+        enum AgentResult {
+            case emotion(EmotionResult)
+            case memory(MemoryResult)
+            case action(ActionResult)
+        }
+
+        let results = await withTaskGroup(of: AgentResult.self, returning: [AgentResult].self) { group in
+            if selection.runEmotion {
+                emotionStatus = .running
+                group.addTask { [self] in
+                    let result = await self.runEmotionAgent(enrichedMessage, chatService: chatService)
+                    return .emotion(result)
+                }
+            }
+
+            if selection.runMemory {
+                memoryStatus = .running
+                group.addTask { [self] in
+                    // Stagger by 1.5s to avoid 429
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    let result = await self.runMemoryAgent(enrichedMessage, entrySummaries: ragEntrySummaries, chatService: chatService)
+                    return .memory(result)
+                }
+            }
+
+            if selection.runAction {
+                actionStatus = .running
+                group.addTask { [self] in
+                    // Stagger by 3s to avoid 429
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    let result = await self.runActionAgent(enrichedMessage, habitContext: habitContextStr, chatService: chatService)
+                    return .action(result)
+                }
+            }
+
+            var collected: [AgentResult] = []
+            for await result in group {
+                collected.append(result)
+            }
+            return collected
+        }
+
+        // Unpack results
+        for result in results {
+            switch result {
+            case .emotion(let e): emotion = e
+            case .memory(let m): memory = m
+            case .action(let a): action = a
+            }
+        }
+
+        // Health status (local only, no API)
+        if selection.runHealth, let healthSnapshot {
+            healthStatus = .running
+            let insightCount = healthSnapshot.insights.count
+            healthStatus = .completed("\(insightCount)条健康洞察")
+        }
 
         // Phase 2: Execute actions (write to SwiftData)
         executeActions(action, modelContext: modelContext)
@@ -140,6 +220,7 @@ final class MultiAgentPipeline {
             ragResults: ragResults,
             context: recentEntries,
             habits: habits,
+            healthSnapshot: healthSnapshot,
             chatService: chatService,
             onDelta: onSynthesisDelta
         )
@@ -155,7 +236,8 @@ final class MultiAgentPipeline {
             action: action,
             response: parsed.cleanText,
             richCards: richCards,
-            ragResults: ragResults
+            ragResults: ragResults,
+            intentType: selection.intent.label
         )
     }
 
@@ -164,20 +246,10 @@ final class MultiAgentPipeline {
         emotionStatus = .idle
         memoryStatus = .idle
         actionStatus = .idle
+        healthStatus = .idle
         synthesisStatus = .idle
+        currentIntentType = nil
         isRunning = false
-    }
-
-    // MARK: - Staggered wrappers (avoid API 429 rate limiting)
-
-    private func runMemoryAgentStaggered(_ message: String, entrySummaries: [(String, String, String)], chatService: ChatService) async -> MemoryResult {
-        try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5s delay
-        return await runMemoryAgent(message, entrySummaries: entrySummaries, chatService: chatService)
-    }
-
-    private func runActionAgentStaggered(_ message: String, habitContext: String, chatService: ChatService) async -> ActionResult {
-        try? await Task.sleep(nanoseconds: 3_000_000_000) // 3s delay
-        return await runActionAgent(message, habitContext: habitContext, chatService: chatService)
     }
 
     // MARK: - Emotion Agent
@@ -201,7 +273,6 @@ final class MultiAgentPipeline {
                 .replacingOccurrences(of: "```", with: "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
-            // Try direct parse
             var jsonStr = cleaned
             if let data = jsonStr.data(using: .utf8),
                let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -215,7 +286,6 @@ final class MultiAgentPipeline {
                 return result
             }
 
-            // Fallback: extract JSON from within response text
             if let start = cleaned.firstIndex(of: "{"),
                let end = cleaned.lastIndex(of: "}") {
                 jsonStr = String(cleaned[start...end])
@@ -233,19 +303,43 @@ final class MultiAgentPipeline {
             }
 
             print("Emotion Agent: JSON parse failed. Raw: \(cleaned.prefix(200))")
-            emotionStatus = .completed("neutral 3/5")
-            return EmotionResult(emotion: "neutral", intensity: 3, moodScore: 3, needs: [])
+            emotionStatus = .completed("fallback")
+            return .empty
         } catch {
             print("Emotion Agent error: \(error)")
-            emotionStatus = .completed("neutral 3/5")
-            return EmotionResult(emotion: "neutral", intensity: 3, moodScore: 3, needs: [])
+            emotionStatus = .completed("本地检测")
+            return localEmotionFallback(message)
         }
+    }
+
+    // MARK: - Local Emotion Fallback (keyword-based, no API needed)
+
+    private func localEmotionFallback(_ message: String) -> EmotionResult {
+        let lower = message
+        if lower.contains("领导") && (lower.contains("批") || lower.contains("说我") || lower.contains("否") || lower.contains("开会")) {
+            return EmotionResult(emotion: "压力大", intensity: 4, moodScore: 2, needs: ["安慰", "认可"])
+        }
+        if lower.contains("累") || lower.contains("加班") || lower.contains("焦虑") || lower.contains("睡不着") || lower.contains("压力") {
+            return EmotionResult(emotion: "焦虑", intensity: 3, moodScore: 2, needs: ["安慰"])
+        }
+        if lower.contains("难过") || lower.contains("低落") || lower.contains("哭") || lower.contains("很烦") {
+            return EmotionResult(emotion: "难过", intensity: 4, moodScore: 1, needs: ["安慰", "倾听"])
+        }
+        if lower.contains("开心") || lower.contains("好消息") || lower.contains("成功") || lower.contains("通过") || lower.contains("棒") {
+            return EmotionResult(emotion: "开心", intensity: 4, moodScore: 5, needs: ["庆祝"])
+        }
+        if lower.contains("跑步") || lower.contains("运动") || lower.contains("健身") || lower.contains("爽") {
+            return EmotionResult(emotion: "满足", intensity: 4, moodScore: 5, needs: ["庆祝", "认可"])
+        }
+        if lower.contains("平静") || lower.contains("还好") || lower.contains("一般") {
+            return EmotionResult(emotion: "平静", intensity: 2, moodScore: 3, needs: [])
+        }
+        return EmotionResult(emotion: "平静", intensity: 2, moodScore: 3, needs: ["倾听"])
     }
 
     // MARK: - Memory Agent
 
     private func runMemoryAgent(_ message: String, entrySummaries: [(String, String, String)], chatService: ChatService) async -> MemoryResult {
-        // Build diary history context from RAG-filtered results
         let historyText = entrySummaries.map { (dateStr, mood, summary) in
             "[\(dateStr)] \(mood) \(summary)"
         }.joined(separator: "\n")
@@ -281,7 +375,6 @@ final class MultiAgentPipeline {
                 .replacingOccurrences(of: "```", with: "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
-            // Try parsing JSON (direct or extracted from text)
             var jsonStr = cleaned
             var obj: [String: Any]?
 
@@ -319,12 +412,12 @@ final class MultiAgentPipeline {
             }
 
             print("Memory Agent: JSON parse failed. Raw: \(cleaned.prefix(200))")
-            memoryStatus = .completed("0 related")
-            return MemoryResult(relevant: [], patterns: [])
+            memoryStatus = .completed("fallback")
+            return .empty
         } catch {
             print("Memory Agent error: \(error)")
-            memoryStatus = .completed("0 related")
-            return MemoryResult(relevant: [], patterns: [])
+            memoryStatus = .completed("fallback")
+            return .empty
         }
     }
 
@@ -364,28 +457,23 @@ final class MultiAgentPipeline {
             return parseActionResponse(response, isoFormatter: isoFormatter)
         } catch {
             print("Action Agent error: \(error)")
-            actionStatus = .completed("None")
-            return ActionResult(schedules: [], habits: [], goals: [])
+            actionStatus = .completed("fallback")
+            return .empty
         }
     }
 
-    /// Resilient JSON parsing for Action Agent — never returns .failed if API succeeded
     private func parseActionResponse(_ response: String, isoFormatter: ISO8601DateFormatter) -> ActionResult {
-        print("Action Agent raw response: \(response.prefix(500))")
-
         let cleaned = response
             .replacingOccurrences(of: "```json", with: "")
             .replacingOccurrences(of: "```", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard let data = cleaned.data(using: .utf8) else {
-            print("Action Agent: cannot convert response to data")
             actionStatus = .completed("None")
-            return ActionResult(schedules: [], habits: [], goals: [])
+            return .empty
         }
 
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            // Try to extract JSON from within the response (LLM might add text around it)
             if let jsonStart = cleaned.firstIndex(of: "{"),
                let jsonEnd = cleaned.lastIndex(of: "}") {
                 let jsonSubstr = String(cleaned[jsonStart...jsonEnd])
@@ -394,9 +482,8 @@ final class MultiAgentPipeline {
                     return extractActionFromJSON(subObj, isoFormatter: isoFormatter)
                 }
             }
-            print("Action Agent: JSON parse failed. Raw response: \(cleaned.prefix(200))")
             actionStatus = .completed("None")
-            return ActionResult(schedules: [], habits: [], goals: [])
+            return .empty
         }
 
         return extractActionFromJSON(obj, isoFormatter: isoFormatter)
@@ -408,13 +495,8 @@ final class MultiAgentPipeline {
             for s in schedules {
                 guard let title = s["title"] as? String,
                       let dateStr = s["date"] as? String else { continue }
-                // Try multiple date formats
-                let date = isoFormatter.date(from: dateStr)
-                    ?? parseFlexibleDate(dateStr)
-                guard let parsedDate = date else {
-                    print("Action Agent: cannot parse date '\(dateStr)' for '\(title)'")
-                    continue
-                }
+                let date = isoFormatter.date(from: dateStr) ?? parseFlexibleDate(dateStr)
+                guard let parsedDate = date else { continue }
                 let notes = s["notes"] as? String
                 extractedSchedules.append(ExtractedSchedule(title: title, date: parsedDate, notes: notes))
             }
@@ -432,15 +514,8 @@ final class MultiAgentPipeline {
         return ActionResult(schedules: extractedSchedules, habits: extractedHabits, goals: goals)
     }
 
-    /// Try common date formats beyond ISO8601
     private func parseFlexibleDate(_ str: String) -> Date? {
-        let formatters: [String] = [
-            "yyyy-MM-dd",
-            "yyyy/MM/dd",
-            "yyyy.MM.dd",
-            "MM/dd/yyyy",
-            "MM-dd-yyyy",
-        ]
+        let formatters = ["yyyy-MM-dd", "yyyy/MM/dd", "yyyy.MM.dd", "MM/dd/yyyy", "MM-dd-yyyy"]
         for fmt in formatters {
             let df = DateFormatter()
             df.dateFormat = fmt
@@ -453,32 +528,20 @@ final class MultiAgentPipeline {
     // MARK: - Execute Actions (SwiftData)
 
     private func executeActions(_ action: ActionResult, modelContext: ModelContext) {
-        let isoFormatter = ISO8601DateFormatter()
-        isoFormatter.formatOptions = [.withFullDate]
-
         for schedule in action.schedules {
-            let item = ScheduleItem(
-                title: schedule.title,
-                date: schedule.date,
-                notes: schedule.notes
-            )
+            let item = ScheduleItem(title: schedule.title, date: schedule.date, notes: schedule.notes)
             modelContext.insert(item)
         }
-
         for habitName in action.habits {
-            let habit = HabitEntry(
-                name: habitName,
-                date: Date()
-            )
+            let habit = HabitEntry(name: habitName, date: Date())
             modelContext.insert(habit)
         }
-
         if !action.schedules.isEmpty || !action.habits.isEmpty {
             try? modelContext.save()
         }
     }
 
-    // MARK: - Synthesis Agent (streaming)
+    // MARK: - Synthesis Agent (streaming, with health context)
 
     private func runSynthesisAgent(
         userMessage: String,
@@ -490,10 +553,10 @@ final class MultiAgentPipeline {
         ragResults: [RAGService.RAGResult],
         context: [DiaryEntry],
         habits: [HabitEntry],
+        healthSnapshot: HealthSnapshot? = nil,
         chatService: ChatService,
         onDelta: @escaping (String) -> Void
     ) async -> String {
-        // Build habit streak info
         let calendar = Calendar.current
         let today = Date()
         let weekStart = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: today))!
@@ -501,7 +564,6 @@ final class MultiAgentPipeline {
         var habitCounts: [String: Int] = [:]
         for h in thisWeekHabits { habitCounts[h.name, default: 0] += 1 }
 
-        // Build context string
         let recentContext = context.prefix(5).map { entry in
             let dateStr = entry.createdAt.formatted(date: .abbreviated, time: .shortened)
             return "[\(dateStr)] \(entry.moodEmoji ?? "") \(entry.summary)"
@@ -516,16 +578,27 @@ final class MultiAgentPipeline {
             return "\(emoji) \(name): \(count) times this week"
         }.joined(separator: "\n")
 
-        // Build RAG context string
         let ragContext = ragResults.map { r in
             let dateStr = r.date.formatted(date: .abbreviated, time: .omitted)
             return "[\(dateStr)] \(r.moodEmoji ?? "") \(r.summary) (similarity: \(String(format: "%.0f%%", r.score * 100)))"
         }.joined(separator: "\n")
 
+        // Build health context section
+        var healthSection = ""
+        if let hs = healthSnapshot {
+            healthSection = """
+
+            === 健康数据 ===
+            今日: 步数\(hs.steps), 睡眠\(String(format: "%.1f", hs.sleepHours))小时(\(hs.sleepQuality.label)), 运动\(hs.workoutMinutes)分钟
+            本周趋势: 步数[\(hs.weeklySteps.map { String($0.steps) }.joined(separator: ", "))], 睡眠[\(hs.weeklySleep.map { String(format: "%.1f", $0.hours) }.joined(separator: ", "))]
+            健康洞察: \(hs.insights.map(\.detail).joined(separator: "; "))
+            """
+        }
+
         let systemPrompt = """
         You are Echo, a warm and insightful penguin diary companion.
 
-        You have access to analysis from three specialized agents and on-device semantic retrieval:
+        You have access to analysis from specialized agents and on-device semantic retrieval:
 
         === SEMANTIC RETRIEVAL (RAG) ===
         Top semantically similar past entries (on-device vector search):
@@ -550,6 +623,7 @@ final class MultiAgentPipeline {
 
         === RECENT DIARY CONTEXT ===
         \(recentContext.isEmpty ? "No recent entries" : recentContext)
+        \(healthSection)
 
         === RESPONSE INSTRUCTIONS ===
         1. Be warm, specific, and proactive
@@ -557,17 +631,18 @@ final class MultiAgentPipeline {
         3. If relevant memories were found, reference them naturally
         4. If actions were extracted, confirm them
         5. If habit streaks exist, celebrate progress
-        6. Keep response 2-4 sentences
-        7. You may include rich content cards using this format:
+        6. If health data is available, mention relevant health insights naturally
+        7. Keep response 2-4 sentences
+        8. You may include rich content cards using this format:
            <card type="habitStreak">{"name":"exercise","streak":3,"change":1}</card>
            <card type="scheduleConfirm">{"title":"Product Meeting","date":"2026-03-11"}</card>
            <card type="memoryRecall">{"summary":"past entry summary","date":"2026-03-01","reason":"why relevant"}</card>
            <card type="patternInsight">{"pattern":"description","evidence":"data","occurrences":4}</card>
-        8. Place cards BEFORE the text response
-        9. Only include cards when they add value (don't force them)
+           <card type="healthInsight">{"type":"sleepMood","title":"睡眠与心情","detail":"detail text","correlation":"r=0.72"}</card>
+        9. Place cards BEFORE the text response
+        10. Only include cards when they add value (don't force them)
         """
 
-        // Build user message — with photos/videos as multimodal content if present
         let messages: [[String: Any]]
         if !photoFileNames.isEmpty || !videoFileNames.isEmpty {
             var contentParts: [[String: Any]] = []
@@ -606,7 +681,56 @@ final class MultiAgentPipeline {
             return result
         } catch {
             print("Synthesis Agent failed: \(error)")
-            return "I hear you! \(emotion.emotion == "happy" ? "That's great to hear!" : "I'm here for you.") Tell me more about what's going on."
+            let fallback = buildOfflineFallback(
+                emotion: emotion,
+                memory: memory,
+                ragResults: ragResults,
+                onDelta: onDelta
+            )
+            return fallback
         }
+    }
+
+    // MARK: - Offline Fallback Response
+
+    private func buildOfflineFallback(
+        emotion: EmotionResult,
+        memory: MemoryResult,
+        ragResults: [RAGService.RAGResult],
+        onDelta: (String) -> Void
+    ) -> String {
+        var parts: [String] = []
+
+        // 附加记忆卡片（如果有相关历史）
+        if let topResult = ragResults.first, topResult.score > 0.4 {
+            let dateStr = topResult.date.formatted(date: .abbreviated, time: .omitted)
+            let cardJSON = """
+            <card type="memoryRecall">{"summary":"\(topResult.summary.prefix(40).replacingOccurrences(of: "\"", with: "'"))...","date":"\(dateStr)","reason":"与你现在说的很相似"}</card>
+            """
+            parts.append(cardJSON)
+        }
+
+        // 根据情绪生成温暖的中文回应
+        let textResponse: String
+        switch emotion.emotion {
+        case "压力大", "焦虑", "紧张":
+            textResponse = "压力大的时候，能说出来就已经很好了 💙 你现在最压着心口的那件事，是什么？"
+        case "难过", "沮丧", "失落":
+            textResponse = "听起来这段时间不容易 🫂 我在这里，你可以继续说——不用整理，想到什么说什么。"
+        case "开心", "兴奋", "满足":
+            textResponse = "感觉到你今天状态不错！🌟 能跟我说说是什么让你这么开心吗？我想记下来。"
+        case "疲惫", "累":
+            textResponse = "身体在说够了，要听一听它的话 🌙 今晚能早点休息吗？"
+        case "平静":
+            textResponse = "嗯，我在听 🐧 今天有什么想说的，或者想记录下来的？"
+        default:
+            textResponse = "谢谢你愿意跟我说 🐧 继续讲——你今天最想被记住的是哪件事？"
+        }
+        parts.append(textResponse)
+
+        let fullResponse = parts.joined(separator: "\n")
+        // 模拟流式输出
+        onDelta(fullResponse)
+        return fullResponse
     }
 }

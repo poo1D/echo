@@ -18,7 +18,8 @@ final class AutoSaveService {
         insightService: InsightService? = nil,
         scheduleHabitService: ScheduleHabitService? = nil,
         ragService: RAGService? = nil,
-        minimumUserMessages: Int = 2
+        minimumUserMessages: Int = 2,
+        moodEmoji: String? = nil
     ) async {
         // Extract messages from feed items
         let messages = extractMessages(from: feedItems)
@@ -31,7 +32,8 @@ final class AutoSaveService {
             insightService: insightService,
             scheduleHabitService: scheduleHabitService,
             ragService: ragService,
-            minimumUserMessages: minimumUserMessages
+            minimumUserMessages: minimumUserMessages,
+            moodEmoji: moodEmoji
         )
     }
 
@@ -70,7 +72,8 @@ final class AutoSaveService {
         insightService: InsightService? = nil,
         scheduleHabitService: ScheduleHabitService? = nil,
         ragService: RAGService? = nil,
-        minimumUserMessages: Int = 2
+        minimumUserMessages: Int = 2,
+        moodEmoji: String? = nil
     ) async {
         let userMessageCount = messages.filter { $0.role == .user }.count
         guard userMessageCount >= minimumUserMessages else { return }
@@ -85,6 +88,12 @@ final class AutoSaveService {
         // Encode transcript
         let transcriptData = DiaryEntry.encodeTranscript(messages)
 
+        // Build topics: normalize through predefined tag pool + include mood checkin tag
+        var topics = TopicTagService.normalize(result.topics)
+        if moodEmoji != nil {
+            topics.append(MoodUtils.moodCheckinTopic)
+        }
+
         // Create entry
         let entry = DiaryEntry(
             summary: result.summary,
@@ -94,7 +103,7 @@ final class AutoSaveService {
             audioFileNames: sessionAudioFiles,
             photoFileNames: sessionPhotoFiles,
             videoFileNames: sessionVideoFiles,
-            topics: result.topics,
+            topics: topics,
             locationName: sessionLocation?.name,
             latitude: sessionLocation?.latitude,
             longitude: sessionLocation?.longitude

@@ -79,6 +79,41 @@ final class VideoPickerService {
         selectedItems.removeAll()
     }
 
+    /// 直接接收相机录制的视频 URL，无需经过 PhotosPickerItem
+    func addCapturedVideo(from sourceURL: URL) async {
+        isProcessing = true
+        defer { isProcessing = false }
+
+        let asset = AVURLAsset(url: sourceURL)
+        guard let duration = try? await asset.load(.duration) else { return }
+        let durationSeconds = CMTimeGetSeconds(duration)
+        guard durationSeconds > 0 && durationSeconds <= 60 else { return }
+
+        let fileName = "video_\(Int(Date().timeIntervalSince1970))_\(UUID().uuidString.prefix(6)).mp4"
+        let outputURL = Self.videoURL(for: fileName)
+
+        guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetMediumQuality) else { return }
+        exportSession.outputURL = outputURL
+        exportSession.outputFileType = .mp4
+        await exportSession.export()
+        guard exportSession.status == .completed else { return }
+
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: outputURL))
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 240, height: 240)
+        let thumbnailTime = CMTimeMakeWithSeconds(min(1.0, durationSeconds / 2), preferredTimescale: 600)
+        let thumbnail: UIImage
+        if let cgImage = try? generator.copyCGImage(at: thumbnailTime, actualTime: nil) {
+            thumbnail = UIImage(cgImage: cgImage)
+        } else {
+            thumbnail = UIImage(systemName: "video.fill")!
+        }
+
+        // 清理临时文件（相机录制的临时 URL）
+        try? FileManager.default.removeItem(at: sourceURL)
+        pendingVideos.append(PendingVideo(fileName: fileName, thumbnail: thumbnail, duration: durationSeconds))
+    }
+
     func removePending(id: UUID) {
         if let video = pendingVideos.first(where: { $0.id == id }) {
             let url = Self.videoURL(for: video.fileName)

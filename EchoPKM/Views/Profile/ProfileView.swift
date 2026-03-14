@@ -20,9 +20,9 @@ struct ProfileView: View {
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Echo PKM")
-                                .font(.headline)
-                            Text("Your personal knowledge companion")
-                                .font(.caption)
+                                .font(.yuantiHeadline)
+                            Text("你的个人知识伙伴")
+                                .font(.yuantiCaption)
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -30,46 +30,52 @@ struct ProfileView: View {
                 }
 
                 // Settings section
-                Section("Settings") {
+                Section("设置") {
                     Toggle(isOn: $autoSaveEnabled) {
-                        Label("Auto-Save Diary", systemImage: "arrow.clockwise")
+                        Label("自动保存日记", systemImage: "arrow.clockwise")
                     }
                     .tint(Color.claudeAccent)
 
                     HStack {
-                        Label("API Key", systemImage: "key.fill")
+                        Label("API密钥", systemImage: "key.fill")
                         Spacer()
                         Text(apiKeyStatus)
-                            .font(.caption)
+                            .font(.yuantiCaption)
                             .foregroundStyle(.secondary)
                     }
                 }
 
                 // Data section
-                Section("Data") {
-                    Label("Export Data", systemImage: "square.and.arrow.up")
+                Section("数据") {
+                    Label("导出数据", systemImage: "square.and.arrow.up")
                         .foregroundStyle(Color.claudeWarmGray)
                 }
 
                 // About section
-                Section("About") {
+                Section("关于") {
                     HStack {
-                        Label("Version", systemImage: "info.circle")
+                        Label("版本", systemImage: "info.circle")
                         Spacer()
                         Text(appVersion)
-                            .font(.caption)
+                            .font(.yuantiCaption)
                             .foregroundStyle(.secondary)
                     }
                 }
             }
-            .navigationTitle("Profile")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("我的")
+                        .font(.yuanti(20, weight: .bold))
+                }
+            }
         }
     }
 
     private var apiKeyStatus: String {
         let key = APIConfig.modelScopeAPIKey
         if key.isEmpty {
-            return "Not configured"
+            return "未配置"
         }
         let prefix = String(key.prefix(6))
         return "\(prefix)..."

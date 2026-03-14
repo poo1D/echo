@@ -19,7 +19,7 @@ struct VideoPlayerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+                    Button("完成") { dismiss() }
                 }
             }
             .onAppear {

@@ -10,7 +10,7 @@ struct LocationPickerSheet: View {
             VStack(spacing: 20) {
                 if locationService.isLocating {
                     Spacer()
-                    ProgressView("Getting your location...")
+                    ProgressView("正在获取位置...")
                     Spacer()
                 } else if let loc = locationService.pendingLocation {
                     Map(initialPosition: .region(
@@ -29,7 +29,7 @@ struct LocationPickerSheet: View {
                         Image(systemName: "mappin.and.ellipse")
                             .foregroundStyle(.orange)
                         Text(loc.name)
-                            .font(.subheadline)
+                            .font(.yuantiSubheadline)
                             .lineLimit(2)
                     }
                     .padding(.horizontal)
@@ -39,8 +39,8 @@ struct LocationPickerSheet: View {
                     Button {
                         dismiss()
                     } label: {
-                        Text("Add Location")
-                            .font(.headline)
+                        Text("添加位置")
+                            .font(.yuantiHeadline)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 14)
                             .background(Color.blue)
@@ -56,7 +56,7 @@ struct LocationPickerSheet: View {
                             .font(.system(size: 36))
                             .foregroundStyle(.secondary)
                         Text(error)
-                            .font(.subheadline)
+                            .font(.yuantiSubheadline)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                     }
@@ -64,15 +64,15 @@ struct LocationPickerSheet: View {
                     Spacer()
                 } else {
                     Spacer()
-                    ProgressView("Getting your location...")
+                    ProgressView("正在获取位置...")
                     Spacer()
                 }
             }
-            .navigationTitle("Location")
+            .navigationTitle("位置")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") {
+                    Button("取消") {
                         locationService.clearPending()
                         dismiss()
                     }

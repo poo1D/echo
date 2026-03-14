@@ -1,19 +1,36 @@
 import SwiftUI
-import SwiftData
 
 struct MoodPickerPopover: View {
-    @Environment(\.modelContext) private var modelContext
     @Binding var isPresented: Bool
-    @Binding var todayMoodEmoji: String?
+    @Binding var selectedMoodEmoji: String?
+    var onMoodSelected: ((String) -> Void)? = nil
 
     @State private var showToast = false
+    @State private var titleIndex = 0
+    @State private var toastIndex = 0
+
+    private let titles = [
+        "今天心情怎么样？",
+        "现在感觉如何？",
+        "选一个最像你此刻的状态",
+        "今天过得怎样？",
+        "此刻，你是什么心情？"
+    ]
+
+    private let toasts = [
+        "好的，我在听",
+        "收到，说来听听",
+        "嗯，我陪着你",
+        "随时可以说",
+        "我听着呢"
+    ]
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 6)
 
     var body: some View {
         VStack(spacing: 16) {
-            Text("今天心情如何？")
-                .font(.headline)
+            Text(titles[titleIndex])
+                .font(.yuantiHeadline)
                 .foregroundStyle(.primary)
 
             LazyVGrid(columns: columns, spacing: 12) {
@@ -25,7 +42,7 @@ struct MoodPickerPopover: View {
                             .font(.system(size: 32))
                             .frame(width: 48, height: 48)
                             .background(
-                                todayMoodEmoji == emoji
+                                selectedMoodEmoji == emoji
                                     ? Color.claudeAccent.opacity(0.2)
                                     : Color.clear
                             )
@@ -36,25 +53,26 @@ struct MoodPickerPopover: View {
             }
 
             if showToast {
-                Text("心情已记录")
-                    .font(.caption)
+                Text(toasts[toastIndex])
+                    .font(.yuantiCaption)
                     .foregroundStyle(Color.claudeAccent)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
         .padding(20)
-        .frame(maxWidth: 320)
-        .background(Color.claudeCardBg)
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: .black.opacity(0.1), radius: 16, y: 8)
+        .frame(maxWidth: .infinity)
+        .onAppear {
+            titleIndex = Int.random(in: 0..<titles.count)
+            toastIndex = Int.random(in: 0..<toasts.count)
+        }
     }
 
     private func selectMood(_ emoji: String) {
         let generator = UIImpactFeedbackGenerator(style: .medium)
         generator.impactOccurred()
 
-        saveMoodCheckin(emoji: emoji)
-        todayMoodEmoji = emoji
+        selectedMoodEmoji = emoji
+        onMoodSelected?(emoji)
 
         withAnimation(.easeIn(duration: 0.2)) {
             showToast = true
@@ -66,38 +84,5 @@ struct MoodPickerPopover: View {
                 showToast = false
             }
         }
-    }
-
-    private func saveMoodCheckin(emoji: String) {
-        let calendar = Calendar.current
-        let todayStart = calendar.startOfDay(for: Date())
-        let tomorrowStart = calendar.date(byAdding: .day, value: 1, to: todayStart)!
-        let sentinel = MoodUtils.moodCheckinTopic
-
-        // Find existing mood check-in for today
-        let descriptor = FetchDescriptor<DiaryEntry>(
-            predicate: #Predicate<DiaryEntry> {
-                $0.createdAt >= todayStart && $0.createdAt < tomorrowStart
-            }
-        )
-
-        let todayEntries = (try? modelContext.fetch(descriptor)) ?? []
-        let existing = todayEntries.first { $0.topics.contains(sentinel) }
-
-        if let entry = existing {
-            entry.summary = "心情记录: \(emoji)"
-            entry.moodEmoji = emoji
-            entry.moodScore = MoodUtils.score(for: emoji)
-        } else {
-            let entry = DiaryEntry(
-                summary: "心情记录: \(emoji)",
-                moodEmoji: emoji,
-                moodScore: MoodUtils.score(for: emoji),
-                topics: [sentinel]
-            )
-            modelContext.insert(entry)
-        }
-
-        try? modelContext.save()
     }
 }

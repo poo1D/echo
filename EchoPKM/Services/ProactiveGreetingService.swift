@@ -8,7 +8,8 @@ final class ProactiveGreetingService {
     func generateFeedCards(
         entries: [DiaryEntry],
         schedules: [ScheduleItem],
-        habits: [HabitEntry]
+        habits: [HabitEntry],
+        healthSnapshot: HealthSnapshot? = nil
     ) -> [FeedItem] {
         var cards: [FeedItem] = []
         let calendar = Calendar.current
@@ -26,7 +27,7 @@ final class ProactiveGreetingService {
                 icon: "calendar",
                 iconColor: "4A90D9",
                 title: schedule.title,
-                subtitle: "Today at \(timeStr)",
+                subtitle: "今天 \(timeStr)",
                 type: .schedule
             )))
         }
@@ -37,7 +38,7 @@ final class ProactiveGreetingService {
                 icon: "calendar.badge.clock",
                 iconColor: "7B68EE",
                 title: schedule.title,
-                subtitle: "Tomorrow at \(timeStr)",
+                subtitle: "明天 \(timeStr)",
                 type: .schedule
             )))
         }
@@ -55,8 +56,8 @@ final class ProactiveGreetingService {
             cards.append(.proactiveCard(ProactiveCardData(
                 icon: "flame.fill",
                 iconColor: "FF6B35",
-                title: "\(emoji) \(name.capitalized) streak: \(days.count) days!",
-                subtitle: "Keep it going this week",
+                title: "\(emoji) \(name.capitalized) 连续: \(days.count)天！",
+                subtitle: "继续保持！",
                 type: .habit
             )))
         }
@@ -69,8 +70,8 @@ final class ProactiveGreetingService {
                 cards.append(.proactiveCard(ProactiveCardData(
                     icon: "heart.fill",
                     iconColor: "E8A0BF",
-                    title: "I've noticed things have been tough",
-                    subtitle: "I'm here whenever you want to talk",
+                    title: "最近似乎不太容易",
+                    subtitle: "随时可以和我聊聊",
                     type: .mood
                 )))
             }
@@ -84,24 +85,51 @@ final class ProactiveGreetingService {
             cards.append(.proactiveCard(ProactiveCardData(
                 icon: "bubble.left.fill",
                 iconColor: "66CDAA",
-                title: "Yesterday you mentioned \(topic)",
-                subtitle: "How's that going today?",
+                title: "昨天你提到了\(topic)",
+                subtitle: "今天怎么样了？",
                 type: .memory
             )))
+        }
+
+        // 5. Health-related proactive cards
+        if let hs = healthSnapshot {
+            // Sleep warning
+            for insight in hs.insights {
+                switch insight.type {
+                case .sleepWarning:
+                    cards.append(.proactiveCard(ProactiveCardData(
+                        icon: "moon.zzz.fill",
+                        iconColor: "7B68EE",
+                        title: "昨晚只睡了\(String(format: "%.1f", hs.sleepHours))小时",
+                        subtitle: "今天悠着点~",
+                        type: .mood
+                    )))
+                case .exerciseStreak:
+                    cards.append(.proactiveCard(ProactiveCardData(
+                        icon: "figure.run",
+                        iconColor: "4CAF50",
+                        title: insight.title,
+                        subtitle: insight.detail,
+                        type: .habit
+                    )))
+                default:
+                    break
+                }
+            }
         }
 
         return cards
     }
 
     /// Generate a smart greeting based on context
-    func generateGreeting(entries: [DiaryEntry], habits: [HabitEntry]) -> String {
+    func generateGreeting(entries: [DiaryEntry], habits: [HabitEntry], healthSnapshot: HealthSnapshot? = nil) -> String {
         let hour = Calendar.current.component(.hour, from: Date())
         let timeGreeting: String
         switch hour {
-        case 5..<12: timeGreeting = "Good morning!"
-        case 12..<17: timeGreeting = "Good afternoon!"
-        case 17..<22: timeGreeting = "Good evening!"
-        default: timeGreeting = "Still up?"
+        case 5..<12: timeGreeting = "早上好！"
+        case 12..<17: timeGreeting = "下午好！"
+        case 17..<22: timeGreeting = "晚上好！"
+        default: timeGreeting = "还没睡呀？"
         }
 
         // Add context-aware suffix
@@ -109,7 +137,7 @@ final class ProactiveGreetingService {
             let calendar = Calendar.current
             if calendar.isDateInYesterday(lastEntry.createdAt), !lastEntry.topics.isEmpty {
                 let topic = lastEntry.topics.first ?? ""
-                return "\(timeGreeting) You mentioned \(topic) yesterday — how's that going?"
+                return "\(timeGreeting) 昨天你提到了\(topic)——今天怎么样了？"
             }
         }
 
@@ -119,14 +147,14 @@ final class ProactiveGreetingService {
         var counts: [String: Int] = [:]
         for h in weekHabits { counts[h.name, default: 0] += 1 }
         if let top = counts.max(by: { $0.value < $1.value }), top.value >= 3 {
-            return "\(timeGreeting) Your \(top.key) streak is at \(top.value) days!"
+            return "\(timeGreeting) \(top.key)已经坚持\(top.value)天了！"
         }
 
         switch hour {
-        case 5..<12: return "\(timeGreeting) How's your day starting?"
-        case 12..<17: return "\(timeGreeting) What's been on your mind?"
-        case 17..<22: return "\(timeGreeting) How was your day?"
-        default: return "Can't sleep? I'm here to listen."
+        case 5..<12: return "\(timeGreeting) 新的一天，有什么想聊的吗？"
+        case 12..<17: return "\(timeGreeting) 最近在想些什么？"
+        case 17..<22: return "\(timeGreeting) 今天过得怎么样？"
+        default: return "睡不着？我在这里陪你。"
         }
     }
 }

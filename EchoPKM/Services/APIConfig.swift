@@ -2,5 +2,5 @@ import Foundation
 
 /// Central API configuration — update your key here
 enum APIConfig {
-    static let modelScopeAPIKey = "ms-7d462fc7-327d-43d9-8e40-f77d4914a932"
+    static let modelScopeAPIKey = "ms-43921800-d14a-4667-94ad-8cfec5b1eda6"
 }

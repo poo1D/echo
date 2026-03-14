@@ -16,24 +16,24 @@ struct MemoryRecallCard: View {
                     .foregroundStyle(Color(hex: "7B68EE"))
                 Spacer()
                 Text(data.date.formatted(date: .abbreviated, time: .omitted))
-                    .font(.caption2)
+                    .font(.yuantiCaption2)
                     .foregroundStyle(.secondary)
             }
 
             HStack(spacing: 6) {
                 if let emoji = data.moodEmoji {
                     Text(emoji)
-                        .font(.title3)
+                        .font(.yuantiTitle3)
                 }
                 Text(data.summary)
-                    .font(.subheadline)
+                    .font(.yuantiSubheadline)
                     .foregroundStyle(.primary)
                     .lineLimit(3)
             }
 
             if !data.relevanceReason.isEmpty {
                 Text(data.relevanceReason)
-                    .font(.caption)
+                    .font(.yuantiCaption)
                     .foregroundStyle(.secondary)
                     .italic()
             }
@@ -60,7 +60,7 @@ struct MoodTrendCard: View {
             }
 
             Text(data.insight)
-                .font(.subheadline)
+                .font(.yuantiSubheadline)
                 .foregroundStyle(.primary)
 
             // Mini trend visualization
@@ -120,13 +120,13 @@ struct ScheduleConfirmCard: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(data.title)
-                    .font(.subheadline.weight(.medium))
+                    .font(.yuanti(15, weight: .medium))
                 Text(data.date.formatted(date: .abbreviated, time: .omitted))
-                    .font(.caption)
+                    .font(.yuantiCaption)
                     .foregroundStyle(.secondary)
                 if let notes = data.notes, !notes.isEmpty {
                     Text(notes)
-                        .font(.caption)
+                        .font(.yuantiCaption)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -135,7 +135,7 @@ struct ScheduleConfirmCard: View {
 
             if data.isNew {
                 Text("已添加")
-                    .font(.caption2.weight(.semibold))
+                    .font(.yuanti(11, weight: .semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
@@ -156,18 +156,18 @@ struct HabitStreakCard: View {
     var body: some View {
         HStack(spacing: 10) {
             Text(data.emoji)
-                .font(.title2)
+                .font(.yuantiTitle2)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(data.habitName.capitalized)
-                    .font(.subheadline.weight(.medium))
+                    .font(.yuanti(15, weight: .medium))
                 HStack(spacing: 4) {
                     Text("本周: \(data.streakCount)次")
-                        .font(.caption)
+                        .font(.yuantiCaption)
                         .foregroundStyle(.secondary)
                     if data.change > 0 {
                         Text("+\(data.change)")
-                            .font(.caption.weight(.semibold))
+                            .font(.yuanti(12, weight: .semibold))
                             .foregroundStyle(Color(hex: "4CAF50"))
                     }
                 }
@@ -206,18 +206,18 @@ struct PatternInsightCard: View {
                 if data.occurrences > 0 {
                     Spacer()
                     Text("观察到 \(data.occurrences) 次")
-                        .font(.caption2)
+                        .font(.yuantiCaption2)
                         .foregroundStyle(.secondary)
                 }
             }
 
             Text(data.pattern)
-                .font(.subheadline.weight(.medium))
+                .font(.yuanti(15, weight: .medium))
                 .foregroundStyle(.primary)
 
             if !data.evidence.isEmpty {
                 Text(data.evidence)
-                    .font(.caption)
+                    .font(.yuantiCaption)
                     .foregroundStyle(.secondary)
             }
         }
@@ -261,17 +261,17 @@ struct HealthInsightCard: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(iconColor)
                 Text(data.title)
-                    .font(.caption.weight(.semibold))
+                    .font(.yuanti(12, weight: .semibold))
                     .foregroundStyle(iconColor)
             }
 
             Text(data.detail)
-                .font(.subheadline)
+                .font(.yuantiSubheadline)
                 .foregroundStyle(.primary)
 
             if let correlation = data.correlation, !correlation.isEmpty {
                 Text(correlation)
-                    .font(.caption)
+                    .font(.yuantiCaption)
                     .foregroundStyle(.secondary)
                     .italic()
             }

@@ -32,6 +32,7 @@ struct ConversationView: View {
     @State private var healthSnapshot: HealthSnapshot?
 
     var petState: PetState
+    var initialMoodEmoji: String?
     var dismiss: () -> Void
 
     private var hasUserMessages: Bool {
@@ -72,7 +73,7 @@ struct ConversationView: View {
                         ProgressView()
                             .scaleEffect(0.7)
                         Text("保存中...")
-                            .font(.caption.weight(.medium))
+                            .font(.yuantiCaption.weight(.medium))
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 7)
@@ -84,7 +85,7 @@ struct ConversationView: View {
                 // Toast confirmation
                 if showSaveConfirmation {
                     Text("已保存到日记")
-                        .font(.caption.weight(.medium))
+                        .font(.yuantiCaption.weight(.medium))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
@@ -115,7 +116,7 @@ struct ConversationView: View {
                     if hasUserMessages && !pipeline.isRunning && !autoSaveService.isSaving {
                         Button(action: manualSave) {
                             Label("保存", systemImage: "book.closed")
-                                .font(.caption.weight(.medium))
+                                .font(.yuantiCaption.weight(.medium))
                         }
                         .foregroundStyle(Color.claudeAccent)
                     }
@@ -154,6 +155,11 @@ struct ConversationView: View {
                         FeedItemView(item: item)
                             .id(item.id)
                     }
+                    // 引导提示：仅在没有用户消息时显示
+                    if !hasUserMessages {
+                        suggestedPromptsView
+                            .padding(.top, 4)
+                    }
                 }
                 .padding(.vertical, 12)
             }
@@ -165,18 +171,67 @@ struct ConversationView: View {
         }
     }
 
+    // MARK: - Suggested Prompts
+
+    private let suggestedPrompts = [
+        "今天开会被领导说了，好难受",
+        "刚跑完步，累但很爽 💪",
+        "最近睡眠很差，很焦虑",
+        "今天有个好消息想分享！",
+    ]
+
+    private var suggestedPromptsView: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("试试说...")
+                .font(.yuantiCaption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 20)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(suggestedPrompts, id: \.self) { prompt in
+                        Button {
+                            inputText = prompt
+                            sendMessage(prompt)
+                        } label: {
+                            Text(prompt)
+                                .font(.yuantiCaption.weight(.medium))
+                                .foregroundStyle(Color.claudeAccent)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 9)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 20)
+                                        .fill(Color.claudeAccent.opacity(0.08))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 20)
+                                                .strokeBorder(Color.claudeAccent.opacity(0.2), lineWidth: 1)
+                                        )
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+        }
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
+    }
+
     // MARK: - Load Proactive Cards
 
     private func loadProactiveCards() {
         guard !hasLoadedProactive else { return }
         hasLoadedProactive = true
 
-        let cards = greetingService.generateFeedCards(
+        // Greeting bubble — mirrors the text shown on the home hub
+        let greetingText = greetingService.generateGreeting(
             entries: Array(recentEntries),
-            schedules: Array(allSchedules),
             habits: Array(allHabits)
         )
-        feedItems.append(contentsOf: cards)
+        feedItems.append(.assistantMessage(AssistantMessageData(textContent: greetingText)))
+
+        // Proactive cards (schedule reminders, habit streaks, mood care…) — 仅在主页展示，对话页不显示
+        // let cards = greetingService.generateFeedCards(...)
     }
 
     // MARK: - Send Message (Multi-Agent Pipeline)
@@ -229,16 +284,15 @@ struct ConversationView: View {
             videoFileNames: videoFileNames
         )))
 
-        // 2. Add pipeline visualization (will be updated in real-time)
-        let pipelineIndex = feedItems.count
-        feedItems.append(.agentPipeline(pipeline.snapshot))
-
-        // 3. Add placeholder assistant message (for streaming)
+        // 2. Add placeholder assistant message (for streaming) — 不再插入 pipeline 卡片
         let assistantIndex = feedItems.count
         feedItems.append(.assistantMessage(AssistantMessageData()))
 
         // 4. Run Multi-Agent Pipeline with intent routing
         Task {
+            // 用于累积原始流式文本（含 <card> 标记），与显示内容分离
+            var rawStreamText = ""
+
             let result = await pipeline.process(
                 userMessage: text,
                 photoFileNames: photoFileNames,
@@ -254,33 +308,22 @@ struct ConversationView: View {
                 agentSelection: agentSelection,
                 healthSnapshot: healthSnapshot,
                 onSynthesisDelta: { delta in
-                    // Update pipeline snapshot in real-time
-                    if pipelineIndex < feedItems.count {
-                        feedItems[pipelineIndex] = .agentPipeline(pipeline.snapshot)
-                    }
-
-                    // Append streaming text to assistant message
-                    if assistantIndex < feedItems.count,
-                       case .assistantMessage(var data) = feedItems[assistantIndex] {
-                        data.textContent += delta
-                        feedItems[assistantIndex] = .assistantMessage(data)
+                    rawStreamText += delta
+                    // 流式阶段过滤掉 <card> 标记，避免 JSON 内容暴露给用户
+                    let displayText = Self.stripCardMarkup(rawStreamText)
+                    if assistantIndex < feedItems.count {
+                        feedItems[assistantIndex] = .assistantMessage(
+                            AssistantMessageData(textContent: displayText)
+                        )
                     }
                 }
             )
 
-            // Update pipeline to final state
-            if pipelineIndex < feedItems.count {
-                feedItems[pipelineIndex] = .agentPipeline(pipeline.snapshot)
-            }
-
-            // Parse rich cards and update assistant message
-            let parsed = ToolCallParser.parse(result.response)
+            // 流式结束后替换为完整解析结果（result.response 已是 cleanText）
             if assistantIndex < feedItems.count {
-                let assistantData = AssistantMessageData(
-                    textContent: parsed.cleanText,
-                    richCards: parsed.cards
+                feedItems[assistantIndex] = .assistantMessage(
+                    AssistantMessageData(textContent: result.response, richCards: result.richCards)
                 )
-                feedItems[assistantIndex] = .assistantMessage(assistantData)
             }
 
             // Also store assistant response in chatService for save compatibility
@@ -301,23 +344,7 @@ struct ConversationView: View {
             // Pet reacts to completion
             petState.reactToPipeline(.completed)
 
-            // Add action confirm cards
-            for schedule in result.action.schedules {
-                feedItems.append(.actionConfirm(ActionConfirmData(
-                    actionType: .scheduleCreated,
-                    title: "已添加日程",
-                    detail: "\(schedule.title) \(schedule.date.formatted(date: .abbreviated, time: .omitted))",
-                    isExecuted: true
-                )))
-            }
-            for habit in result.action.habits {
-                feedItems.append(.actionConfirm(ActionConfirmData(
-                    actionType: .habitLogged,
-                    title: "习惯已记录",
-                    detail: "今日已记录 \(habit.capitalized)",
-                    isExecuted: true
-                )))
-            }
+            // 不再在对话页追加 actionConfirm 卡片，由主页的 ProactiveActionStack 处理
 
             pipeline.reset()
         }
@@ -335,7 +362,8 @@ struct ConversationView: View {
                 modelContext: modelContext,
                 insightService: insightService,
                 scheduleHabitService: scheduleHabitService,
-                ragService: ragService
+                ragService: ragService,
+                moodEmoji: initialMoodEmoji
             )
         }
     }
@@ -351,7 +379,8 @@ struct ConversationView: View {
                 insightService: insightService,
                 scheduleHabitService: scheduleHabitService,
                 ragService: ragService,
-                minimumUserMessages: 1
+                minimumUserMessages: 1,
+                moodEmoji: initialMoodEmoji
             )
             withAnimation {
                 showSaveConfirmation = true
@@ -378,5 +407,25 @@ struct ConversationView: View {
                 proxy.scrollTo(lastID, anchor: .bottom)
             }
         }
+    }
+
+    /// 流式渲染时，过滤掉 <card> 标记（完整的和尚未关闭的），只展示纯文本
+    private static func stripCardMarkup(_ text: String) -> String {
+        var result = text
+        // 去除已闭合的 <card type="...">...</card> 块
+        if let regex = try? NSRegularExpression(pattern: #"<card\s+type="\w+">[\s\S]*?</card>"#) {
+            let range = NSRange(result.startIndex..., in: result)
+            result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: "")
+        }
+        // 去除末尾尚未关闭的 <card...> 片段（流式过程中未完成的 card 块）
+        if let lastCardStart = result.range(of: "<card", options: .backwards) {
+            let afterTag = result[lastCardStart.lowerBound...]
+            if !afterTag.contains("</card>") {
+                result = String(result[..<lastCardStart.lowerBound])
+            }
+        }
+        return result
+            .replacingOccurrences(of: "\n\n\n", with: "\n\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

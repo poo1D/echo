@@ -15,22 +15,23 @@ struct EchoHubSection: View {
                     if #available(iOS 26.0, *) {
                         Circle()
                             .fill(.clear)
-                            .frame(width: 160, height: 160)
+                            .frame(width: 260, height: 260)
                             .glassEffect(.regular, in: .circle)
                     } else {
                         Circle()
                             .fill(Color.white)
-                            .frame(width: 160, height: 160)
-                            .shadow(color: Color.claudeAccent.opacity(0.15), radius: 12, y: 4)
+                            .frame(width: 260, height: 260)
+                            .shadow(color: Color.claudeAccent.opacity(0.15), radius: 20, y: 6)
                     }
 
                     PetView(petState: petState)
-                        .scaleEffect(0.85)
+                        .scaleEffect(1.25)
                         .allowsHitTesting(false)
                 }
+                .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .frame(height: 200)
+            .frame(height: 300)
 
             // Greeting text
             Text(greeting)

@@ -9,10 +9,10 @@ struct WeekDateRow: View {
             ForEach(weekDays, id: \.self) { date in
                 VStack(spacing: 4) {
                     Text(dayLetter(date))
-                        .font(.caption2)
+                        .font(.yuantiCaption2)
                         .foregroundStyle(.secondary)
                     Text("\(calendar.component(.day, from: date))")
-                        .font(.caption.weight(calendar.isDateInToday(date) ? .bold : .regular))
+                        .font(calendar.isDateInToday(date) ? .yuanti(12, weight: .bold) : .yuantiCaption)
                         .foregroundStyle(calendar.isDateInToday(date) ? .white : .primary)
                         .frame(width: 28, height: 28)
                         .background(

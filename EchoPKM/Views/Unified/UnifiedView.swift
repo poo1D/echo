@@ -19,7 +19,9 @@ struct UnifiedView: View {
     @State private var selectedTags: Set<String> = []
     @State private var showTagFilter = false
     @State private var showMoodPicker = false
-    @State private var todayMoodEmoji: String?
+    @State private var pendingMoodEmoji: String?
+
+    @State private var showCelebration = false
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -36,6 +38,13 @@ struct UnifiedView: View {
                         onTapEcho: {
                             showConversation = true
                         }
+                    )
+
+                    // Proactive action stack (schedules + habits)
+                    ProactiveActionStackView(
+                        todaySchedules: todayIncompleteSchedules,
+                        recentHabits: Array(allHabits),
+                        showCelebration: $showCelebration
                     )
 
                     // Diary timeline
@@ -57,7 +66,7 @@ struct UnifiedView: View {
             Button {
                 showMoodPicker = true
             } label: {
-                Text(todayMoodEmoji ?? "😊")
+                Text(pendingMoodEmoji ?? "😊")
                     .font(.system(size: 24))
                     .frame(width: 44, height: 44)
                     .modifier(GlassCircleModifier())
@@ -66,6 +75,12 @@ struct UnifiedView: View {
             .buttonStyle(.plain)
             .padding(.trailing, 16)
             .padding(.top, 8)
+
+            // Celebration overlay
+            if showCelebration {
+                CelebrationOverlayView(isShowing: $showCelebration)
+                    .zIndex(100)
+            }
         }
         .background(
             LinearGradient(
@@ -82,8 +97,11 @@ struct UnifiedView: View {
         .fullScreenCover(isPresented: $showConversation) {
             ConversationView(
                 petState: petState,
+                initialMoodEmoji: pendingMoodEmoji,
                 dismiss: {
                     showConversation = false
+                    // Clear pending mood after conversation closes
+                    pendingMoodEmoji = nil
                 }
             )
         }
@@ -120,13 +138,26 @@ struct UnifiedView: View {
         .sheet(isPresented: $showMoodPicker) {
             MoodPickerPopover(
                 isPresented: $showMoodPicker,
-                todayMoodEmoji: $todayMoodEmoji
+                selectedMoodEmoji: $pendingMoodEmoji,
+                onMoodSelected: { emoji in
+                    // Auto-open conversation when mood is selected
+                    showConversation = true
+                }
             )
             .presentationDetents([.height(220)])
             .presentationDragIndicator(.visible)
         }
         .onAppear {
             loadTodayMood()
+        }
+    }
+
+    // MARK: - Today's Incomplete Schedules
+
+    private var todayIncompleteSchedules: [ScheduleItem] {
+        let calendar = Calendar.current
+        return allSchedules.filter {
+            !$0.isCompleted && calendar.isDate($0.date, inSameDayAs: Date())
         }
     }
 
@@ -157,8 +188,10 @@ struct UnifiedView: View {
         let todayStart = calendar.startOfDay(for: Date())
         let sentinel = MoodUtils.moodCheckinTopic
         let todayEntries = entries.filter { $0.createdAt >= todayStart }
+        // Only show mood indicator if there's a mood-tagged entry from today
+        // Don't pre-populate pendingMoodEmoji - user needs to explicitly select each time
         if let existing = todayEntries.first(where: { $0.topics.contains(sentinel) }) {
-            todayMoodEmoji = existing.moodEmoji
+            pendingMoodEmoji = existing.moodEmoji
         }
     }
 

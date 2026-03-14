@@ -6,14 +6,13 @@ struct ReviewView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \DiaryEntry.createdAt, order: .reverse) private var allEntries: [DiaryEntry]
     @Query(sort: \HabitEntry.date, order: .reverse) private var allHabits: [HabitEntry]
+    @Query(sort: \ScheduleItem.date) private var allSchedules: [ScheduleItem]
 
     @State private var weekOffset = 0
     @State private var petObservation: String?
     @State private var isLoadingObservation = false
     @State private var petState = PetState()
     @State private var insightService = InsightService()
-    @State private var healthService = HealthKitService()
-    @State private var healthSnapshot: HealthSnapshot?
 
     var body: some View {
         NavigationStack {
@@ -25,13 +24,12 @@ struct ReviewView: View {
                     // Module 1: Mood Trend
                     moodTrendCard
 
-                    // Module 2: Habit Heatmap
-                    habitHeatmapCard
+                    // Module 2: Topic Cloud
+                    if !topicFrequencies.isEmpty {
+                        topicCloudCard
+                    }
 
-                    // Module 3: Health Trends
-                    healthTrendCard
-
-                    // Module 4: Weekly Letter
+                    // Module 3: Weekly Letter
                     weeklyLetterCard
                 }
                 .padding()
@@ -47,7 +45,6 @@ struct ReviewView: View {
             }
             .task(id: weekOffset) {
                 await loadPetObservation()
-                await loadHealthData()
             }
         }
     }
@@ -67,7 +64,7 @@ struct ReviewView: View {
             Spacer()
 
             Text(weekLabel)
-                .font(.subheadline.weight(.medium))
+                .font(.yuanti(15, weight: .medium))
                 .foregroundStyle(.primary)
 
             Spacer()
@@ -113,6 +110,26 @@ struct ReviewView: View {
 
     private var weekEntries: [DiaryEntry] {
         allEntries.filter { $0.createdAt >= selectedWeekStart && $0.createdAt < selectedWeekEnd }
+    }
+
+    private var weekHabits: [HabitEntry] {
+        allHabits.filter { $0.date >= selectedWeekStart && $0.date < selectedWeekEnd }
+    }
+
+    private var weekSchedules: [ScheduleItem] {
+        allSchedules.filter { $0.date >= selectedWeekStart && $0.date < selectedWeekEnd }
+    }
+
+    private var topicFrequencies: [(topic: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        for entry in weekEntries {
+            for topic in entry.topics {
+                let t = topic.trimmingCharacters(in: .whitespaces)
+                guard !t.isEmpty else { continue }
+                counts[t, default: 0] += 1
+            }
+        }
+        return counts.sorted { $0.value > $1.value }.map { (topic: $0.key, count: $0.value) }
     }
 
     // MARK: - Module 1: Mood Trend
@@ -164,7 +181,7 @@ struct ReviewView: View {
                 if !moodDataPoints.isEmpty {
                     let trend = MoodUtils.trendLabel(from: moodDataPoints.map { Int($0.score.rounded()) })
                     Text("\(trend.text) \(trend.arrow)")
-                        .font(.subheadline.weight(.medium))
+                        .font(.yuanti(15, weight: .medium))
                         .foregroundStyle(Color.claudeAccent)
                 }
             }
@@ -175,7 +192,7 @@ struct ReviewView: View {
                         .font(.largeTitle)
                         .foregroundStyle(Color.claudeWarmGray.opacity(0.4))
                     Text("这周还没有记录哦")
-                        .font(.subheadline)
+                        .font(.yuantiSubheadline)
                         .foregroundStyle(.tertiary)
                 }
                 .frame(maxWidth: .infinity)
@@ -232,14 +249,14 @@ struct ReviewView: View {
                     let scores = moodDataPoints.map { $0.score }
                     let avg = scores.reduce(0, +) / Double(scores.count)
                     Text("平均: \(String(format: "%.1f", avg))")
-                        .font(.caption)
+                        .font(.yuantiCaption)
                         .foregroundStyle(Color.claudeWarmGray)
 
                     Text("|")
                         .foregroundStyle(Color.claudeDivider)
 
                     Text("\(weekEntries.count)篇记录")
-                        .font(.caption)
+                        .font(.yuantiCaption)
                         .foregroundStyle(Color.claudeWarmGray)
                 }
             }
@@ -248,406 +265,156 @@ struct ReviewView: View {
         .glassCard(tint: .glassMoodTint)
     }
 
-    // MARK: - Module 2: Habit Tracker
+    // MARK: - Module 2: Topic Cloud
 
-    private enum DayStatus {
-        case completed, missed, future
-    }
-
-    private struct HabitWeekRow: Identifiable {
-        let id = UUID()
-        let habitName: String
-        let emoji: String
-        let dailyStatus: [DayStatus] // 7 entries: Mon-Sun
-        let weekCount: Int
-    }
-
-    private var habitWeekRows: [HabitWeekRow] {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-
-        // Collect all unique habit names ever recorded
-        let allNames = Set(allHabits.map { $0.name.lowercased() })
-        guard !allNames.isEmpty else { return [] }
-
-        // Build a set of (habitName, dayStart) for the selected week
-        let weekHabits = allHabits.filter { $0.date >= selectedWeekStart && $0.date < selectedWeekEnd }
-        var completedSet: Set<String> = [] // "name|dayIndex"
-        for habit in weekHabits {
-            let dayStart = calendar.startOfDay(for: habit.date)
-            let dayIndex = calendar.dateComponents([.day], from: selectedWeekStart, to: dayStart).day ?? 0
-            if dayIndex >= 0 && dayIndex < 7 {
-                completedSet.insert("\(habit.name.lowercased())|\(dayIndex)")
-            }
-        }
-
-        // Build rows
-        var rows: [HabitWeekRow] = []
-        for name in allNames {
-            let emoji = HabitStreakData.emojiFor(name)
-            var statuses: [DayStatus] = []
-            var count = 0
-            for dayIndex in 0..<7 {
-                let date = calendar.date(byAdding: .day, value: dayIndex, to: selectedWeekStart)!
-                let dayStart = calendar.startOfDay(for: date)
-                if dayStart > today {
-                    statuses.append(.future)
-                } else if completedSet.contains("\(name)|\(dayIndex)") {
-                    statuses.append(.completed)
-                    count += 1
-                } else {
-                    statuses.append(.missed)
-                }
-            }
-            rows.append(HabitWeekRow(habitName: name, emoji: emoji, dailyStatus: statuses, weekCount: count))
-        }
-
-        // Sort: by week count descending, then alphabetically
-        rows.sort { lhs, rhs in
-            if lhs.weekCount != rhs.weekCount { return lhs.weekCount > rhs.weekCount }
-            return lhs.habitName < rhs.habitName
-        }
-
-        return rows
-    }
-
-    private var habitHeatmapCard: some View {
+    private var topicCloudCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Header
             HStack {
-                Label("习惯追踪", systemImage: "square.grid.3x3.fill")
+                Label("话题", systemImage: "tag.fill")
                     .font(.yuantiHeadline)
                     .foregroundStyle(.primary)
-
                 Spacer()
+                Text("共 \(topicFrequencies.count) 个")
+                    .font(.yuantiCaption)
+                    .foregroundStyle(Color.claudeWarmGray)
             }
 
-            if allHabits.isEmpty {
-                // Empty state
-                VStack(spacing: 8) {
-                    Image(systemName: "square.grid.3x3")
-                        .font(.largeTitle)
-                        .foregroundStyle(Color.claudeWarmGray.opacity(0.4))
-                    Text("还没有记录习惯哦")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Text("和Echo聊天时提到你的日常习惯，就会自动记录在这里")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .multilineTextAlignment(.center)
+            let maxCount = topicFrequencies.first?.count ?? 1
+            FlowLayout(spacing: 8) {
+                ForEach(topicFrequencies, id: \.topic) { item in
+                    topicTag(item.topic, count: item.count, maxCount: maxCount)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
-            } else {
-                let rows = habitWeekRows
-                let dayLabels = ["一", "二", "三", "四", "五", "六", "日"]
-
-                // Day-of-week header row
-                HStack(spacing: 0) {
-                    Text("")
-                        .frame(width: 72)
-
-                    ForEach(dayLabels, id: \.self) { label in
-                        Text(label)
-                            .font(.caption2)
-                            .foregroundStyle(Color.claudeWarmGray)
-                            .frame(maxWidth: .infinity)
-                    }
-
-                    Text("")
-                        .frame(width: 52)
-                }
-
-                // Per-habit rows
-                ForEach(rows) { row in
-                    HStack(spacing: 0) {
-                        // Emoji + name
-                        HStack(spacing: 4) {
-                            Text(row.emoji)
-                                .font(.system(size: 14))
-                            Text(row.habitName)
-                                .font(.caption)
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                        }
-                        .frame(width: 72, alignment: .leading)
-
-                        // 7-day status circles
-                        ForEach(0..<7, id: \.self) { dayIndex in
-                            Group {
-                                switch row.dailyStatus[dayIndex] {
-                                case .completed:
-                                    Circle()
-                                        .fill(Color.claudeAccent)
-                                        .frame(width: 10, height: 10)
-                                case .missed:
-                                    Circle()
-                                        .strokeBorder(Color.claudeDivider, lineWidth: 1.5)
-                                        .frame(width: 10, height: 10)
-                                case .future:
-                                    Text("·")
-                                        .font(.caption)
-                                        .foregroundStyle(Color.claudeWarmGray.opacity(0.4))
-                                }
-                            }
-                            .frame(maxWidth: .infinity)
-                        }
-
-                        // Week count
-                        if row.weekCount > 0 {
-                            Text("本周\(row.weekCount)次")
-                                .font(.caption2)
-                                .foregroundStyle(Color.claudeWarmGray)
-                                .frame(width: 52, alignment: .trailing)
-                        } else {
-                            Text("")
-                                .frame(width: 52)
-                        }
-                    }
-                }
-
-                // Legend
-                HStack(spacing: 12) {
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(Color.claudeAccent)
-                            .frame(width: 8, height: 8)
-                        Text("已完成")
-                            .font(.caption2)
-                            .foregroundStyle(Color.claudeWarmGray)
-                    }
-                    HStack(spacing: 4) {
-                        Circle()
-                            .strokeBorder(Color.claudeDivider, lineWidth: 1)
-                            .frame(width: 8, height: 8)
-                        Text("未记录")
-                            .font(.caption2)
-                            .foregroundStyle(Color.claudeWarmGray)
-                    }
-                    HStack(spacing: 4) {
-                        Text("·")
-                            .font(.caption2)
-                            .foregroundStyle(Color.claudeWarmGray.opacity(0.4))
-                        Text("未到")
-                            .font(.caption2)
-                            .foregroundStyle(Color.claudeWarmGray)
-                    }
-
-                    Spacer()
-
-                    let totalWeek = rows.reduce(0) { $0 + $1.weekCount }
-                    if totalWeek > 0 {
-                        Text("本周共完成 \(totalWeek) 个习惯打卡")
-                            .font(.caption2)
-                            .foregroundStyle(Color.claudeWarmGray)
-                    }
-                }
-                .padding(.top, 4)
             }
         }
         .padding(16)
-        .glassCard(tint: .glassHabitTint)
+        .glassCard(tint: .glassMoodTint)
     }
 
-    // MARK: - Module 3: Health Trends Card
+    private func topicTag(_ topic: String, count: Int, maxCount: Int) -> some View {
+        let tier = count == maxCount && maxCount >= 2 ? 3 : (count >= 2 ? 2 : 1)
+        let sizes: [CGFloat]   = [12, 14, 16]
+        let textOps: [Double]  = [0.60, 0.80, 1.00]
+        let bgOps: [Double]    = [0.07, 0.12, 0.18]
+        let hPads: [CGFloat]   = [9, 10, 12]
+        let vPads: [CGFloat]   = [4,  5,  6 ]
 
-    private var healthTrendCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("健康趋势", systemImage: "heart.text.square.fill")
-                    .font(.yuantiHeadline)
-                    .foregroundStyle(.primary)
-
-                Spacer()
-
-                if let hs = healthSnapshot {
-                    Text("今日\(hs.steps)步")
-                        .font(.caption)
-                        .foregroundStyle(Color.claudeWarmGray)
-                }
-            }
-
-            if let hs = healthSnapshot {
-                // Sleep bar chart (7 days)
-                if !hs.weeklySleep.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("睡眠 (小时)")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-
-                        Chart(Array(hs.weeklySleep.enumerated()), id: \.offset) { index, item in
-                            BarMark(
-                                x: .value("Day", dayLabel(for: item.date)),
-                                y: .value("Hours", item.hours)
-                            )
-                            .foregroundStyle(
-                                item.hours >= 7 ? Color(hex: "7B68EE").opacity(0.8) :
-                                item.hours >= 5 ? Color(hex: "7B68EE").opacity(0.5) :
-                                Color(hex: "FF6B35").opacity(0.7)
-                            )
-                            .cornerRadius(4)
-                        }
-                        .chartYScale(domain: 0...10)
-                        .frame(height: 120)
-                    }
-                }
-
-                // Steps line chart (7 days)
-                if !hs.weeklySteps.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("步数")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-
-                        Chart(Array(hs.weeklySteps.enumerated()), id: \.offset) { index, item in
-                            LineMark(
-                                x: .value("Day", dayLabel(for: item.date)),
-                                y: .value("Steps", item.steps)
-                            )
-                            .foregroundStyle(Color(hex: "4CAF50"))
-                            .lineStyle(StrokeStyle(lineWidth: 2))
-                            .interpolationMethod(.catmullRom)
-
-                            PointMark(
-                                x: .value("Day", dayLabel(for: item.date)),
-                                y: .value("Steps", item.steps)
-                            )
-                            .foregroundStyle(Color(hex: "4CAF50"))
-                        }
-                        .frame(height: 100)
-                    }
-                }
-
-                // Correlation annotation
-                let correlations = computeCorrelations()
-                if !correlations.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(Array(correlations.enumerated()), id: \.offset) { _, corr in
-                            HStack(spacing: 6) {
-                                Image(systemName: "arrow.triangle.branch")
-                                    .font(.caption2)
-                                    .foregroundStyle(Color.claudeAccent)
-                                Text(corr.description)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .padding(.top, 4)
-                }
-
-                // Health insights
-                if !hs.insights.isEmpty {
-                    ForEach(Array(hs.insights.prefix(2).enumerated()), id: \.offset) { _, insight in
-                        HStack(spacing: 6) {
-                            Image(systemName: "sparkle")
-                                .font(.caption2)
-                                .foregroundStyle(Color.claudeAccent)
-                            Text(insight.detail)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            } else {
-                VStack(spacing: 8) {
-                    Image(systemName: "heart.text.square")
-                        .font(.largeTitle)
-                        .foregroundStyle(Color.claudeWarmGray.opacity(0.4))
-                    Text("健康数据加载中...")
-                        .font(.subheadline)
-                        .foregroundStyle(.tertiary)
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: 100)
-            }
-        }
-        .padding(16)
-        .glassCard(tint: .glassHealthTint)
+        return Text(topic)
+            .font(.yuanti(sizes[tier - 1], weight: tier == 3 ? .medium : .regular))
+            .foregroundStyle(Color.claudeAccent.opacity(textOps[tier - 1]))
+            .padding(.horizontal, hPads[tier - 1])
+            .padding(.vertical,   vPads[tier - 1])
+            .background(Color.claudeAccent.opacity(bgOps[tier - 1]))
+            .clipShape(Capsule())
     }
 
-    private func dayLabel(for date: Date) -> String {
-        let fmt = DateFormatter()
-        fmt.locale = Locale(identifier: "zh_CN")
-        fmt.dateFormat = "EEE"
-        return fmt.string(from: date)
-    }
-
-    private func computeCorrelations() -> [CorrelationEngine.Correlation] {
-        guard let hs = healthSnapshot else { return [] }
-        let entryMoodData = weekEntries.compactMap { entry -> CorrelationEngine.EntryMoodData? in
-            guard let score = entry.moodScore else { return nil }
-            return CorrelationEngine.EntryMoodData(date: entry.createdAt, moodScore: score)
-        }
-        return CorrelationEngine.analyze(entries: entryMoodData, healthData: hs)
-    }
-
-    // MARK: - Module 4: Weekly Letter Card
+    // MARK: - Module 3: Weekly Letter Card
 
     private var weeklyLetterCard: some View {
         VStack(spacing: 0) {
-            // Envelope flap (triangle)
-            EnvelopeFlap()
-                .fill(
-                    LinearGradient(
-                        colors: [Color.claudeAccent.opacity(0.15), Color.claudeAccent.opacity(0.08)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .frame(height: 50)
-
-            // Card body
-            VStack(spacing: 12) {
-                // Mini penguin
-                PetView(petState: petState)
-                    .scaleEffect(0.3)
-                    .frame(width: 50, height: 60)
-                    .allowsHitTesting(false)
-
-                if weekEntries.isEmpty {
-                    Text("这周还没有记录，Echo还没法给你写信哦")
-                        .font(.subheadline)
-                        .foregroundStyle(Color.claudeWarmGray)
-                        .multilineTextAlignment(.center)
-                } else if isLoadingObservation {
-                    ProgressView()
-                        .tint(Color.claudeAccent)
-                    Text("Echo正在写信中...")
-                        .font(.subheadline)
-                        .foregroundStyle(Color.claudeWarmGray)
-                } else if let observation = petObservation {
-                    Text("叮~ Echo给你写了一封信！")
-                        .font(.yuantiSubheadline.weight(.medium))
+            // Header
+            HStack(alignment: .center) {
+                HStack(spacing: 6) {
+                    Image(systemName: "envelope.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.claudeAccent)
+                    Text("每周来信")
+                        .font(.yuantiHeadline)
                         .foregroundStyle(.primary)
+                }
+                Spacer()
+                Text(weekLabel)
+                    .font(.yuantiCaption)
+                    .foregroundStyle(Color.claudeWarmGray)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.claudeAccent.opacity(0.08))
+                    .clipShape(Capsule())
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
 
-                    Text(observation)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 4)
+            // Dashed divider
+            letterDashedDivider
 
-                    NavigationLink {
-                        WeeklyLettersView()
-                    } label: {
-                        Text("查看所有来信")
-                            .font(.subheadline.weight(.medium))
+            // Body
+            VStack(alignment: .leading, spacing: 12) {
+                if weekEntries.isEmpty {
+                    HStack(spacing: 12) {
+                        miniPet
+                        Text("这周还没有记录，多聊聊 Echo 才能给你写信哦")
+                            .font(.yuantiSubheadline)
+                            .foregroundStyle(Color.claudeWarmGray)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } else if isLoadingObservation {
+                    HStack(spacing: 12) {
+                        miniPet
+                        VStack(alignment: .leading, spacing: 4) {
+                            ProgressView()
+                                .tint(Color.claudeAccent)
+                                .scaleEffect(0.9)
+                            Text("Echo 正在写信…")
+                                .font(.yuantiCaption)
+                                .foregroundStyle(Color.claudeWarmGray)
+                        }
+                    }
+                } else if let observation = petObservation {
+                    HStack(alignment: .top, spacing: 12) {
+                        miniPet
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("亲爱的主人：")
+                                .font(.yuanti(13, weight: .bold))
+                                .foregroundStyle(Color.claudeAccent)
+                            Text(observation)
+                                .font(.yuantiCaption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(3)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    HStack {
+                        Spacer()
+                        NavigationLink {
+                            WeeklyLettersView()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text("查看完整来信")
+                                    .font(.yuanti(14, weight: .medium))
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 11, weight: .medium))
+                            }
                             .foregroundStyle(Color.claudeAccent)
-                            .padding(.horizontal, 20)
+                            .padding(.horizontal, 16)
                             .padding(.vertical, 8)
                             .background(Color.claudeAccent.opacity(0.1))
                             .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
-            .padding(.vertical, 16)
-            .padding(.horizontal, 20)
-            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .glassCard(tint: .glassLetterTint)
+    }
+
+    private var letterDashedDivider: some View {
+        Line()
+            .stroke(style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+            .foregroundStyle(Color.claudeDivider)
+            .frame(height: 1)
+            .padding(.horizontal, 18)
+    }
+
+    private var miniPet: some View {
+        PetView(petState: petState)
+            .scaleEffect(0.35)
+            .frame(width: 44, height: 52)
+            .allowsHitTesting(false)
     }
 
     // MARK: - LLM Observation (with cache)
@@ -662,28 +429,14 @@ struct ReviewView: View {
 
         petObservation = await insightService.weeklyObservation(
             entries: weekEntries,
+            habits: weekHabits,
+            schedules: weekSchedules,
             modelContext: modelContext
         )
     }
 
-    private func loadHealthData() async {
-        await healthService.requestAuthorization()
-        healthSnapshot = await healthService.buildSnapshot()
-    }
 }
 
-// MARK: - Envelope Flap Shape
-
-private struct EnvelopeFlap: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: 0, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.midX, y: 0))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        path.closeSubpath()
-        return path
-    }
-}
 
 #Preview {
     ReviewView()

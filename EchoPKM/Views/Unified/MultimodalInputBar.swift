@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import UniformTypeIdentifiers
 
 struct MultimodalInputBar: View {
     @Binding var text: String
@@ -10,22 +11,52 @@ struct MultimodalInputBar: View {
     @Bindable var locationService: LocationService
     var onSend: (String, [String], [String], PendingLocation?) -> Void
 
-    @State private var isExpanded = false
     @State private var isVoiceMode = false
     @State private var micPulse = false
     @State private var showingLocationPicker = false
     @FocusState private var isTextFieldFocused: Bool
 
-    // Radial fan configuration
-    private let radialItems: [(icon: String, label: String)] = [
-        ("mic.fill", "Voice"),
-        ("camera.fill", "Photo"),
-        ("video.fill", "Video"),
-        ("location.fill", "Location")
-    ]
-    private let fanRadius: CGFloat = 65
-    // Angles for upward arc: -150° to -30°, 4 items evenly spaced
-    private let fanAngles: [Double] = [-150, -110, -70, -30]
+    // Swipe gesture state
+    @State private var isLongPressing = false
+    @State private var swipeOffset: CGSize = .zero
+    @State private var selectedDirection: SwipeDirection? = nil
+    @State private var showCamera = false
+    @State private var showMediaLibrary = false
+    @State private var selectedLibraryItems: [PhotosPickerItem] = []
+
+    // Swipe direction enum
+    enum SwipeDirection: CaseIterable {
+        case left   // 相机（拍照/录视频）
+        case up     // 语音
+        case right  // 相册（图片/视频）
+
+        var icon: String {
+            switch self {
+            case .left: return "camera.fill"
+            case .up: return "mic.fill"
+            case .right: return "photo.fill"
+            }
+        }
+
+        var tint: Color {
+            switch self {
+            case .left: return .blue
+            case .up: return .orange
+            case .right: return .green
+            }
+        }
+
+        var offset: CGSize {
+            switch self {
+            case .left: return CGSize(width: -76, height: -52)
+            case .up: return CGSize(width: 0, height: -90)
+            case .right: return CGSize(width: 76, height: -52)
+            }
+        }
+    }
+
+    // Threshold for direction detection
+    private let activationThreshold: CGFloat = 35
 
     var body: some View {
         VStack(spacing: 8) {
@@ -37,8 +68,8 @@ struct MultimodalInputBar: View {
                 HStack(spacing: 6) {
                     ProgressView()
                         .scaleEffect(0.7)
-                    Text("Processing video...")
-                        .font(.caption)
+                    Text("处理视频中...")
+                        .font(.yuantiCaption)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -53,163 +84,257 @@ struct MultimodalInputBar: View {
         .sheet(isPresented: $showingLocationPicker) {
             LocationPickerSheet(locationService: locationService)
         }
+        .sheet(isPresented: $showCamera) {
+            CameraPickerView(
+                onPhotoCapture: { image in
+                    photoPickerService.addCapturedImage(image)
+                },
+                onVideoCapture: { url in
+                    Task { await videoPickerService.addCapturedVideo(from: url) }
+                }
+            )
+            .ignoresSafeArea()
+        }
+        .photosPicker(
+            isPresented: $showMediaLibrary,
+            selection: $selectedLibraryItems,
+            maxSelectionCount: 5,
+            matching: .any(of: [.images, .videos])
+        )
         .onChange(of: speechService.transcribedText) { _, newValue in
             if speechService.isRecording && !newValue.isEmpty {
                 text = newValue
             }
         }
+        .onChange(of: photoPickerService.selectedItems) { _, _ in
+            Task { await photoPickerService.processSelectedItems() }
+        }
+        .onChange(of: videoPickerService.selectedItems) { _, _ in
+            Task { await videoPickerService.processSelectedItems() }
+        }
+        .onChange(of: selectedLibraryItems) { _, items in
+            Task { await processLibraryItems(items) }
+        }
     }
 
-    // MARK: - Text Input Row (collapsed/expanded)
+    // MARK: - Main Input View (Swipe-first design)
 
     private var textInputRow: some View {
-        HStack(spacing: 10) {
-            // Text field
-            TextField("Say something...", text: $text, axis: .vertical)
-                .focused($isTextFieldFocused)
-                .textFieldStyle(.plain)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(Color(.systemGray6), in: RoundedRectangle(cornerRadius: 20))
-                .lineLimit(1...4)
-
-            // Bloom [+] button with radial fan
+        VStack(spacing: 12) {
+            // Primary: Large swipe button
             ZStack {
-                // Radial items (shown when expanded)
-                ForEach(Array(radialItems.enumerated()), id: \.offset) { index, item in
-                    radialButton(index: index, item: item)
-                        .offset(radialOffset(for: index))
-                        .opacity(isExpanded ? 1 : 0)
-                        .scaleEffect(isExpanded ? 1 : 0.3)
-                        .animation(
-                            .spring(response: 0.35, dampingFraction: 0.7)
-                            .delay(isExpanded ? Double(index) * 0.04 : 0),
-                            value: isExpanded
-                        )
+                // Swipe direction indicators (shown during long press)
+                if isLongPressing {
+                    swipeIndicatorsView
+                        .transition(.opacity.combined(with: .scale))
                 }
 
-                // Bloom button
+                // Main + button with gesture
+                swipeGestureButton
+            }
+            .frame(height: 56)
+
+            // Hint text
+            if !isLongPressing && !isTextFieldFocused {
+                Text("长按选择")
+                    .font(.yuantiCaption2)
+                    .foregroundStyle(.tertiary)
+                    .transition(.opacity)
+            }
+
+            // Secondary: Compact text input row
+            HStack(spacing: 8) {
+                // Expand to text field
+                TextField("或者打字...", text: $text, axis: .vertical)
+                    .focused($isTextFieldFocused)
+                    .textFieldStyle(.plain)
+                    .font(.yuantiSubheadline)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color(.systemGray6).opacity(0.6), in: RoundedRectangle(cornerRadius: 16))
+                    .lineLimit(1...3)
+
+                // Location button
                 Button {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
-                        isExpanded.toggle()
-                    }
-                    if !isExpanded {
-                        isTextFieldFocused = false
-                    }
+                    isTextFieldFocused = false
+                    showingLocationPicker = true
                 } label: {
-                    ZStack {
-                        Circle()
-                            .fill(isExpanded ? Color(.systemGray4) : Color.claudeAccent)
-                            .frame(width: 36, height: 36)
+                    Image(systemName: locationService.pendingLocation != nil ? "location.fill" : "location")
+                        .font(.system(size: 18))
+                        .foregroundStyle(locationService.pendingLocation != nil ? .orange : Color(.tertiaryLabel))
+                }
 
-                        Image(systemName: "plus")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(isExpanded ? Color.primary : Color.white)
-                            .rotationEffect(.degrees(isExpanded ? 45 : 0))
+                // Send button
+                Button {
+                    sendText()
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 28))
+                        .foregroundStyle(canSend ? Color.claudeAccent : Color(.systemGray4))
+                }
+                .disabled(!canSend || isStreaming)
+            }
+            .padding(.horizontal)
+        }
+    }
+
+    // MARK: - Swipe Gesture Button (Larger, primary)
+
+    private var swipeGestureButton: some View {
+        ZStack {
+            // Outer glow when active
+            if isLongPressing {
+                Circle()
+                    .fill(Color.claudeAccent.opacity(0.15))
+                    .frame(width: 72, height: 72)
+                    .blur(radius: 8)
+            }
+
+            Circle()
+                .fill(isLongPressing ? Color(.systemGray4) : Color.claudeAccent)
+                .frame(width: 56, height: 56)
+                .shadow(color: Color.claudeAccent.opacity(isLongPressing ? 0.1 : 0.35), radius: isLongPressing ? 2 : 6, y: 2)
+                .scaleEffect(isLongPressing ? 0.9 : 1.0)
+
+            Image(systemName: "plus")
+                .font(.system(size: 24, weight: .bold))
+                .foregroundStyle(isLongPressing ? Color.primary : Color.white)
+                .rotationEffect(.degrees(isLongPressing ? 45 : 0))
+        }
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isLongPressing)
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    if !isLongPressing && value.translation == .zero {
+                        // Start long press detection
+                        withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) {
+                            isLongPressing = true
+                        }
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    }
+
+                    if isLongPressing {
+                        swipeOffset = value.translation
+                        let newDirection = detectDirection(from: swipeOffset)
+                        if newDirection != selectedDirection {
+                            selectedDirection = newDirection
+                            if newDirection != nil {
+                                UISelectionFeedbackGenerator().selectionChanged()
+                            }
+                        }
                     }
                 }
-                .simultaneousGesture(
-                    LongPressGesture(minimumDuration: 0.5)
-                        .onEnded { _ in
-                            isExpanded = false
-                            enterVoiceMode()
-                        }
-                )
-            }
-            .frame(width: 36, height: 36)
-            .zIndex(1)
-
-            // Send button
-            Button {
-                sendText()
-            } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 32))
-                    .foregroundStyle(canSend ? Color.claudeAccent : .gray)
-            }
-            .disabled(!canSend || isStreaming)
-        }
-        .padding(.horizontal)
-    }
-
-    // MARK: - Radial Button
-
-    @ViewBuilder
-    private func radialButton(index: Int, item: (icon: String, label: String)) -> some View {
-        switch index {
-        case 1: // Photo
-            PhotosPicker(
-                selection: $photoPickerService.selectedItems,
-                maxSelectionCount: 5,
-                matching: .images
-            ) {
-                radialIcon(systemName: item.icon)
-            }
-            .onChange(of: photoPickerService.selectedItems) { _, _ in
-                Task { await photoPickerService.processSelectedItems() }
-                collapseBloom()
-            }
-
-        case 2: // Video
-            PhotosPicker(
-                selection: $videoPickerService.selectedItems,
-                maxSelectionCount: 1,
-                matching: .videos
-            ) {
-                radialIcon(systemName: item.icon)
-            }
-            .onChange(of: videoPickerService.selectedItems) { _, _ in
-                Task { await videoPickerService.processSelectedItems() }
-                collapseBloom()
-            }
-
-        default: // Voice (0), Location (3)
-            Button {
-                handleRadialTap(index)
-            } label: {
-                radialIcon(systemName: item.icon)
-            }
-        }
-    }
-
-    private func radialIcon(systemName: String) -> some View {
-        ZStack {
-            Circle()
-                .fill(Color.claudeSurfaceTint)
-                .frame(width: 44, height: 44)
-
-            Image(systemName: systemName)
-                .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(Color.claudeAccent)
-        }
-        .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
-    }
-
-    private func radialOffset(for index: Int) -> CGSize {
-        let angle = fanAngles[index] * .pi / 180
-        return CGSize(
-            width: cos(angle) * fanRadius,
-            height: sin(angle) * fanRadius
+                .onEnded { _ in
+                    if let direction = selectedDirection {
+                        handleDirectionSelection(direction)
+                    }
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) {
+                        isLongPressing = false
+                        swipeOffset = .zero
+                        selectedDirection = nil
+                    }
+                }
         )
     }
 
-    private func handleRadialTap(_ index: Int) {
-        switch index {
-        case 0: // Voice
-            collapseBloom()
-            enterVoiceMode()
-        case 3: // Location
-            collapseBloom()
-            isTextFieldFocused = false
-            showingLocationPicker = true
-        default:
-            break
+    // MARK: - Swipe Direction Indicators (Icons only)
+
+    private var swipeIndicatorsView: some View {
+        ZStack {
+            // Background blur overlay
+            Circle()
+                .fill(Color.claudeSurfaceTint.opacity(0.4))
+                .frame(width: 260, height: 260)
+                .blur(radius: 40)
+                .offset(y: -36)
+
+            // Direction options (icons only)
+            ForEach(SwipeDirection.allCases, id: \.self) { direction in
+                swipeOptionView(for: direction)
+                    .offset(direction.offset)
+            }
         }
     }
 
-    private func collapseBloom() {
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
-            isExpanded = false
+    private func swipeOptionView(for direction: SwipeDirection) -> some View {
+        let isSelected = selectedDirection == direction
+        let size: CGFloat = isSelected ? 70 : 62
+
+        return ZStack {
+            // Liquidglass base — frosted material circle
+            Circle()
+                .fill(.ultraThinMaterial)
+                .frame(width: size, height: size)
+
+            // Tinted overlay — only when selected
+            if isSelected {
+                Circle()
+                    .fill(direction.tint.opacity(0.22))
+                    .frame(width: size, height: size)
+            }
+
+            // Border — neutral when idle, tinted when selected
+            Circle()
+                .strokeBorder(
+                    isSelected ? direction.tint.opacity(0.70) : Color.primary.opacity(0.12),
+                    lineWidth: isSelected ? 1.5 : 1.0
+                )
+                .frame(width: size, height: size)
+
+            // Icon — colored when selected, secondary when idle
+            Image(systemName: direction.icon)
+                .font(.system(size: isSelected ? 28 : 24, weight: .semibold))
+                .foregroundStyle(isSelected ? direction.tint : Color.secondary)
+        }
+        .shadow(
+            color: isSelected ? direction.tint.opacity(0.45) : Color.black.opacity(0.08),
+            radius: isSelected ? 16 : 5,
+            y: isSelected ? 5 : 2
+        )
+        .scaleEffect(isSelected ? 1.08 : 1.0)
+        .animation(.spring(response: 0.2, dampingFraction: 0.65), value: isSelected)
+    }
+
+    // MARK: - Direction Detection
+
+    private func detectDirection(from offset: CGSize) -> SwipeDirection? {
+        let distance = sqrt(offset.width * offset.width + offset.height * offset.height)
+        guard distance > activationThreshold else { return nil }
+
+        // Calculate angle (in degrees, 0 = right, 90 = up, 180/-180 = left, -90 = down)
+        let angle = atan2(-offset.height, offset.width) * 180 / .pi
+
+        // Map angles to directions (only upward semicircle)
+        if angle > 120 || angle < -150 {
+            // Left-upper quadrant → Photo
+            return .left
+        } else if angle >= 60 && angle <= 120 {
+            // Top → Voice
+            return .up
+        } else if angle > 0 && angle < 60 {
+            // Right-upper quadrant → Video
+            return .right
+        }
+
+        return nil
+    }
+
+    private func handleDirectionSelection(_ direction: SwipeDirection) {
+        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+        isTextFieldFocused = false
+
+        switch direction {
+        case .left:
+            if isCameraAvailable {
+                showCamera = true
+            } else {
+                // 模拟器没有相机，降级为相册
+                showMediaLibrary = true
+            }
+        case .up:
+            enterVoiceMode()
+        case .right:
+            showMediaLibrary = true
         }
     }
 
@@ -263,8 +388,8 @@ struct MultimodalInputBar: View {
                 }
             }
 
-            Text(speechService.isRecording ? "Listening..." : "Tap to record")
-                .font(.caption)
+            Text(speechService.isRecording ? "聆听中..." : "点击录音")
+                .font(.yuantiCaption)
                 .foregroundStyle(.secondary)
 
             // Cancel / Send row
@@ -308,7 +433,7 @@ struct MultimodalInputBar: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                     Text(loc.name)
-                        .font(.caption)
+                        .font(.yuantiCaption)
                         .lineLimit(1)
                     Button {
                         locationService.clearPending()
@@ -370,7 +495,7 @@ struct MultimodalInputBar: View {
                                         .frame(width: 80, height: 60)
 
                                     Text(VideoPickerService.formatDuration(video.duration))
-                                        .font(.system(size: 9, weight: .medium))
+                                        .font(.yuanti(9, weight: .medium))
                                         .foregroundStyle(.white)
                                         .padding(.horizontal, 4)
                                         .padding(.vertical, 1)
@@ -441,8 +566,28 @@ struct MultimodalInputBar: View {
         let videoFiles = videoPickerService.consumePendingFileNames()
         let location = locationService.consumePending()
         guard !trimmed.isEmpty || !photoFiles.isEmpty || !videoFiles.isEmpty else { return }
-        let messageText = trimmed.isEmpty ? (videoFiles.isEmpty ? "[Photo]" : "[Video]") : trimmed
+        let messageText = trimmed.isEmpty ? (videoFiles.isEmpty ? "[照片]" : "[视频]") : trimmed
         onSend(messageText, photoFiles, videoFiles, location)
         text = ""
+    }
+
+    // MARK: - 相册混合媒体处理（图片 + 视频）
+
+    private func processLibraryItems(_ items: [PhotosPickerItem]) async {
+        for item in items {
+            let isVideo = item.supportedContentTypes.contains(where: {
+                $0.conforms(to: UTType.movie) || $0.conforms(to: UTType.video) || $0.conforms(to: UTType.audiovisualContent)
+            })
+            if isVideo {
+                // 路由到 VideoPickerService
+                videoPickerService.selectedItems = [item]
+                await videoPickerService.processSelectedItems()
+            } else {
+                // 路由到 PhotoPickerService
+                photoPickerService.selectedItems = [item]
+                await photoPickerService.processSelectedItems()
+            }
+        }
+        selectedLibraryItems.removeAll()
     }
 }

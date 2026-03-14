@@ -75,6 +75,8 @@ struct ToolCallParser {
             return parseHabitStreak(obj)
         case "patternInsight":
             return parsePatternInsight(obj)
+        case "healthInsight":
+            return parseHealthInsight(obj)
         default:
             return nil
         }
@@ -123,5 +125,14 @@ struct ToolCallParser {
         let evidence = obj["evidence"] as? String ?? ""
         let occurrences = obj["occurrences"] as? Int ?? 0
         return .patternInsight(PatternInsightData(pattern: pattern, evidence: evidence, occurrences: occurrences))
+    }
+
+    private static func parseHealthInsight(_ obj: [String: Any]) -> RichContent? {
+        guard let title = obj["title"] as? String else { return nil }
+        let typeStr = obj["type"] as? String ?? "sleepMood"
+        let detail = obj["detail"] as? String ?? ""
+        let correlation = obj["correlation"] as? String
+        let type = HealthInsightData.HealthInsightType(rawValue: typeStr) ?? .sleepMood
+        return .healthInsight(HealthInsightData(type: type, title: title, detail: detail, correlation: correlation))
     }
 }

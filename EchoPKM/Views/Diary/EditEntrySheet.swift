@@ -26,14 +26,14 @@ struct EditEntrySheet: View {
                 topicsSection
                 deleteSection
             }
-            .navigationTitle("Edit Entry")
+            .navigationTitle("编辑条目")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("取消") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { save() }
+                    Button("保存") { save() }
                 }
             }
             .onAppear {
@@ -47,14 +47,14 @@ struct EditEntrySheet: View {
     // MARK: - Sections
 
     private var summarySection: some View {
-        Section("Summary") {
+        Section("摘要") {
             TextEditor(text: $summary)
                 .frame(minHeight: 100)
         }
     }
 
     private var moodSection: some View {
-        Section("Mood") {
+        Section("心情") {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
                 ForEach(moodEmojis, id: \.self) { emoji in
                     Text(emoji)
@@ -76,12 +76,12 @@ struct EditEntrySheet: View {
     }
 
     private var topicsSection: some View {
-        Section("Topics") {
+        Section("主题") {
             FlowLayout(spacing: 8) {
                 ForEach(topics, id: \.self) { topic in
                     HStack(spacing: 4) {
                         Text(topic)
-                            .font(.caption)
+                            .font(.yuantiCaption)
                         Button {
                             topics.removeAll { $0 == topic }
                         } label: {
@@ -99,10 +99,10 @@ struct EditEntrySheet: View {
             }
 
             HStack {
-                TextField("Add topic...", text: $newTopic)
+                TextField("添加主题...", text: $newTopic)
                     .textInputAutocapitalization(.never)
                     .onSubmit { addTopic() }
-                Button("Add") { addTopic() }
+                Button("添加") { addTopic() }
                     .disabled(newTopic.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
@@ -116,7 +116,7 @@ struct EditEntrySheet: View {
             } label: {
                 HStack {
                     Spacer()
-                    Label("Delete Entry", systemImage: "trash")
+                    Label("删除条目", systemImage: "trash")
                     Spacer()
                 }
             }

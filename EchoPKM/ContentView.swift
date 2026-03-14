@@ -2,7 +2,13 @@ import SwiftUI
 import SwiftData
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @Query(sort: \DiaryEntry.createdAt, order: .reverse) private var entries: [DiaryEntry]
+    @Query(sort: \HabitEntry.date, order: .reverse) private var habits: [HabitEntry]
+    @Query(sort: \ScheduleItem.date) private var schedules: [ScheduleItem]
+    
     @State private var selectedTab = 0
+    var notificationService: NotificationService
 
     var body: some View {
         Group {
@@ -34,10 +40,19 @@ struct ContentView: View {
                 .tint(Color.claudeAccent)
             }
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                notificationService.checkAndSendSmartCare(
+                    entries: Array(entries),
+                    habits: Array(habits),
+                    schedules: Array(schedules)
+                )
+            }
+        }
     }
 }
 
 #Preview {
-    ContentView()
+    ContentView(notificationService: NotificationService())
         .modelContainer(for: [DiaryEntry.self, WeeklyReview.self, ScheduleItem.self, HabitEntry.self], inMemory: true)
 }

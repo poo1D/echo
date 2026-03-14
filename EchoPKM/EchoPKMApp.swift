@@ -4,6 +4,7 @@ import SwiftData
 @main
 struct EchoPKMApp: App {
     let modelContainer: ModelContainer
+    @State private var notificationService = NotificationService()
 
     init() {
         let schema = Schema([DiaryEntry.self, WeeklyReview.self, ScheduleItem.self, HabitEntry.self])
@@ -25,13 +26,28 @@ struct EchoPKMApp: App {
             container = try! ModelContainer(for: schema, configurations: [config])
         }
 
-        SampleDataService.seedIfNeeded(modelContext: container.mainContext)
+        // Seed sample data and index for RAG
+        if let seededEntries = SampleDataService.seedIfNeeded(modelContext: container.mainContext) {
+            // Build RAG index in background so first search has results
+            Task { @MainActor in
+                let ragService = RAGService()
+                ragService.rebuildIndex(entries: seededEntries)
+                print("[App] RAG index built for \(seededEntries.count) sample entries")
+            }
+        }
+
+        // Migrate existing entries to standardized tag system
+        TopicTagService.migrateIfNeeded(modelContext: container.mainContext)
+
         self.modelContainer = container
     }
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(notificationService: notificationService)
+                .task {
+                    await notificationService.requestAuthorization()
+                }
         }
         .modelContainer(modelContainer)
     }

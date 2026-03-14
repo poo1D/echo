@@ -24,7 +24,7 @@ struct DiaryCard: View {
 
             // 3. Summary text
             Text(entry.summary)
-                .font(.body)
+                .font(.yuantiBody)
                 .foregroundStyle(.primary)
                 .lineLimit(showFullInsight ? nil : 4)
 
@@ -40,7 +40,7 @@ struct DiaryCard: View {
                         Image(systemName: "mappin")
                             .font(.caption2)
                         Text(loc)
-                            .font(.caption)
+                            .font(.yuantiCaption)
                             .lineLimit(1)
                     }
                     .foregroundStyle(.secondary)
@@ -49,7 +49,7 @@ struct DiaryCard: View {
                 Spacer()
 
                 Text(entry.createdAt.formatted(date: .omitted, time: .shortened))
-                    .font(.caption)
+                    .font(.yuantiCaption)
                     .foregroundStyle(.tertiary)
             }
 
@@ -58,7 +58,7 @@ struct DiaryCard: View {
                 HStack(spacing: 6) {
                     ForEach(Array(entry.topics.prefix(4)), id: \.self) { topic in
                         Text(topic)
-                            .font(.caption2)
+                            .font(.yuantiCaption2)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)
                             .background(Color.claudeAccent.opacity(0.10))
@@ -75,7 +75,7 @@ struct DiaryCard: View {
                         .font(.caption2)
                         .foregroundStyle(.purple)
                     Text(insight)
-                        .font(.caption)
+                        .font(.yuantiCaption)
                         .foregroundStyle(.secondary)
                         .lineLimit(showFullInsight ? nil : 2)
                 }
