@@ -10,6 +10,7 @@ struct UnifiedView: View {
 
     @State private var petState = PetState()
     @State private var greetingService = ProactiveGreetingService()
+    @State private var draftService = DraftSessionService()
 
     @State private var showConversation = false
     @State private var selectedEntry: DiaryEntry?
@@ -98,6 +99,7 @@ struct UnifiedView: View {
             ConversationView(
                 petState: petState,
                 initialMoodEmoji: pendingMoodEmoji,
+                draftService: draftService,
                 dismiss: {
                     showConversation = false
                     // Clear pending mood after conversation closes
@@ -108,13 +110,19 @@ struct UnifiedView: View {
         .sheet(item: $selectedEntry) { entry in
             JournalDetailSheet(entry: entry) { entryToRemove in
                 entryToDelete = entryToRemove
-                showDeleteConfirmation = true
+                selectedEntry = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
+                    showDeleteConfirmation = true
+                }
             }
         }
         .sheet(item: $editingEntry) { entry in
             EditEntrySheet(entry: entry) {
                 entryToDelete = entry
-                showDeleteConfirmation = true
+                editingEntry = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) {
+                    showDeleteConfirmation = true
+                }
             }
         }
         .sheet(isPresented: $showTagFilter) {
@@ -138,17 +146,14 @@ struct UnifiedView: View {
         .sheet(isPresented: $showMoodPicker) {
             MoodPickerPopover(
                 isPresented: $showMoodPicker,
-                selectedMoodEmoji: $pendingMoodEmoji,
-                onMoodSelected: { emoji in
-                    // Auto-open conversation when mood is selected
-                    showConversation = true
-                }
+                selectedMoodEmoji: $pendingMoodEmoji
             )
             .presentationDetents([.height(220)])
             .presentationDragIndicator(.visible)
         }
         .onAppear {
             loadTodayMood()
+            draftService.load()
         }
     }
 

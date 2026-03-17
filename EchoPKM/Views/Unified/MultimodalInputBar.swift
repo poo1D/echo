@@ -1,6 +1,5 @@
 import SwiftUI
 import PhotosUI
-import UniformTypeIdentifiers
 
 struct MultimodalInputBar: View {
     @Binding var text: String
@@ -22,7 +21,6 @@ struct MultimodalInputBar: View {
     @State private var selectedDirection: SwipeDirection? = nil
     @State private var showCamera = false
     @State private var showMediaLibrary = false
-    @State private var selectedLibraryItems: [PhotosPickerItem] = []
 
     // Swipe direction enum
     enum SwipeDirection: CaseIterable {
@@ -84,8 +82,8 @@ struct MultimodalInputBar: View {
         .sheet(isPresented: $showingLocationPicker) {
             LocationPickerSheet(locationService: locationService)
         }
-        .sheet(isPresented: $showCamera) {
-            CameraPickerView(
+        .fullScreenCover(isPresented: $showCamera) {
+            CustomCameraView(
                 onPhotoCapture: { image in
                     photoPickerService.addCapturedImage(image)
                 },
@@ -95,12 +93,12 @@ struct MultimodalInputBar: View {
             )
             .ignoresSafeArea()
         }
-        .photosPicker(
-            isPresented: $showMediaLibrary,
-            selection: $selectedLibraryItems,
-            maxSelectionCount: 5,
-            matching: .any(of: [.images, .videos])
-        )
+        .sheet(isPresented: $showMediaLibrary) {
+            LibraryPickerView(
+                photoPickerService: photoPickerService,
+                videoPickerService: videoPickerService
+            )
+        }
         .onChange(of: speechService.transcribedText) { _, newValue in
             if speechService.isRecording && !newValue.isEmpty {
                 text = newValue
@@ -111,9 +109,6 @@ struct MultimodalInputBar: View {
         }
         .onChange(of: videoPickerService.selectedItems) { _, _ in
             Task { await videoPickerService.processSelectedItems() }
-        }
-        .onChange(of: selectedLibraryItems) { _, items in
-            Task { await processLibraryItems(items) }
         }
     }
 
@@ -569,25 +564,5 @@ struct MultimodalInputBar: View {
         let messageText = trimmed.isEmpty ? (videoFiles.isEmpty ? "[照片]" : "[视频]") : trimmed
         onSend(messageText, photoFiles, videoFiles, location)
         text = ""
-    }
-
-    // MARK: - 相册混合媒体处理（图片 + 视频）
-
-    private func processLibraryItems(_ items: [PhotosPickerItem]) async {
-        for item in items {
-            let isVideo = item.supportedContentTypes.contains(where: {
-                $0.conforms(to: UTType.movie) || $0.conforms(to: UTType.video) || $0.conforms(to: UTType.audiovisualContent)
-            })
-            if isVideo {
-                // 路由到 VideoPickerService
-                videoPickerService.selectedItems = [item]
-                await videoPickerService.processSelectedItems()
-            } else {
-                // 路由到 PhotoPickerService
-                photoPickerService.selectedItems = [item]
-                await photoPickerService.processSelectedItems()
-            }
-        }
-        selectedLibraryItems.removeAll()
     }
 }

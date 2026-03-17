@@ -38,7 +38,7 @@ final class ChatService {
     // MARK: - API Config
 
     private let apiEndpoint = "https://api-inference.modelscope.cn/v1/chat/completions"
-    private let modelId = "moonshotai/Kimi-K2.5"
+
     private var apiKey: String {
         let key = APIConfig.modelScopeAPIKey
         if !key.isEmpty { return key }
@@ -46,6 +46,44 @@ final class ChatService {
             return key
         }
         return ""
+    }
+
+    // MARK: - Model Rotation
+
+    /// Index into APIConfig.models, persisted across launches.
+    private var currentModelIndex: Int {
+        get { UserDefaults.standard.integer(forKey: APIConfig.modelIndexKey) }
+        set { UserDefaults.standard.set(newValue, forKey: APIConfig.modelIndexKey) }
+    }
+
+    /// Returns the model to use for the current request.
+    /// If vision is required and the current model doesn't support it,
+    /// falls back to the first vision-capable model in the pool.
+    private func selectModel(requiresVision: Bool) -> APIConfig.ModelConfig {
+        let pool = requiresVision ? APIConfig.models.filter(\.supportsVision) : APIConfig.models
+        guard !pool.isEmpty else { return APIConfig.models[0] }
+        let current = APIConfig.models[currentModelIndex % APIConfig.models.count]
+        // If current model satisfies the requirement, use it.
+        if pool.contains(where: { $0.id == current.id }) { return current }
+        // Otherwise use the first eligible model.
+        return pool[0]
+    }
+
+    /// Advances currentModelIndex to the next eligible model.
+    /// Skips vision-only models when requiresVision is false if possible,
+    /// but never leaves fewer than 1 option.
+    private func rotateModel(requiresVision: Bool) {
+        let pool = requiresVision ? APIConfig.models.filter(\.supportsVision) : APIConfig.models
+        guard pool.count > 1 else { return }
+        let current = APIConfig.models[currentModelIndex % APIConfig.models.count]
+        // Find current position in eligible pool, advance by 1
+        let currentPoolIdx = pool.firstIndex(where: { $0.id == current.id }) ?? 0
+        let nextPoolIdx = (currentPoolIdx + 1) % pool.count
+        // Map back to index in the full models array
+        if let nextGlobalIdx = APIConfig.models.firstIndex(where: { $0.id == pool[nextPoolIdx].id }) {
+            currentModelIndex = nextGlobalIdx
+            print("[ModelRotation] Switched to: \(pool[nextPoolIdx].displayName)")
+        }
     }
 
     // MARK: - System Prompt
@@ -224,12 +262,9 @@ final class ChatService {
         messages.append(aiMessage)
         let messageIndex = messages.count - 1
 
-        do {
-            var request = URLRequest(url: URL(string: apiEndpoint)!)
-            request.httpMethod = "POST"
-            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let hasMedia = !photoFileNames.isEmpty || !videoFileNames.isEmpty
 
+        do {
             let systemPrompt: String
             if let allEntries {
                 systemPrompt = buildEnhancedSystemPrompt(recentEntries: recentEntries, allEntries: allEntries)
@@ -242,13 +277,10 @@ final class ChatService {
             ]
             for msg in messages.dropLast() where msg.role != .system {
                 var textContent = msg.content
-                // Append location context to the last user message
                 if msg.id == userMessage.id, let loc = location {
                     textContent += "\n[User's current location: \(loc.name)]"
                 }
-
                 if !msg.photoFileNames.isEmpty || !msg.videoFileNames.isEmpty {
-                    // Build multimodal content array with image_url blocks + text
                     var contentParts: [[String: Any]] = []
                     for fileName in msg.photoFileNames {
                         if let base64 = loadPhotoAsBase64(fileName) {
@@ -277,35 +309,63 @@ final class ChatService {
                 }
             }
 
-            let body: [String: Any] = [
-                "model": modelId,
-                "messages": apiMessages,
-                "stream": true
-            ]
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let maxAttempts = hasMedia
+                ? APIConfig.models.filter(\.supportsVision).count
+                : APIConfig.models.count
 
-            let (bytes, response) = try await URLSession.shared.bytes(for: request)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                let code = (response as? HTTPURLResponse)?.statusCode ?? -1
-                throw URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: "HTTP \(code)"])
-            }
-
-            for try await line in bytes.lines {
-                guard line.hasPrefix("data: ") else { continue }
-                let json = String(line.dropFirst(6))
-                if json == "[DONE]" { break }
-
-                if let data = json.data(using: .utf8),
-                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let choices = obj["choices"] as? [[String: Any]],
-                   let delta = choices.first?["delta"] as? [String: Any],
-                   let content = delta["content"] as? String {
-                    messages[messageIndex].content += content
+            var lastError: Error = URLError(.badServerResponse)
+            for attempt in 0..<maxAttempts {
+                if attempt > 0 {
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    rotateModel(requiresVision: hasMedia)
                 }
+
+                let model = selectModel(requiresVision: hasMedia)
+                print("[ChatService.send] Using model: \(model.displayName) (attempt \(attempt + 1))")
+
+                var request = URLRequest(url: URL(string: apiEndpoint)!, timeoutInterval: 60)
+                request.httpMethod = "POST"
+                request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                let body: [String: Any] = ["model": model.id, "messages": apiMessages, "stream": true]
+                request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+                let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+
+                if code == 429 {
+                    print("[ChatService.send] 429 on \(model.displayName), will rotate after 3s")
+                    lastError = URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: "HTTP 429"])
+                    continue
+                }
+
+                guard code == 200 else {
+                    throw URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: "HTTP \(code)"])
+                }
+
+                for try await line in bytes.lines {
+                    guard line.hasPrefix("data: ") else { continue }
+                    let json = String(line.dropFirst(6))
+                    if json == "[DONE]" { break }
+                    if let data = json.data(using: .utf8),
+                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let choices = obj["choices"] as? [[String: Any]],
+                       let delta = choices.first?["delta"] as? [String: Any],
+                       let content = delta["content"] as? String {
+                        messages[messageIndex].content += content
+                    }
+                }
+                // Success — break out of retry loop
+                lastError = URLError(.cancelled) // sentinel: no real error
+                break
             }
+
+            // If we exhausted all models, fall through to catch with lastError
+            if case URLError.cancelled = lastError { /* success */ }
+            else { throw lastError }
+
         } catch {
             errorMessage = error.localizedDescription
-            // Fallback mock response
             messages[messageIndex].content = mockResponse(for: text)
         }
 
@@ -350,8 +410,9 @@ final class ChatService {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
+            let model = selectModel(requiresVision: false)
             let body: [String: Any] = [
-                "model": modelId,
+                "model": model.id,
                 "messages": [
                     ["role": "system", "content": "You are a JSON-only response bot. Output valid JSON only."],
                     ["role": "user", "content": prompt]
@@ -361,10 +422,21 @@ final class ChatService {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
             let (data, _) = try await URLSession.shared.data(for: request)
+
+            // Primary: standard JSON parse
+            var contentString: String?
             if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let choices = obj["choices"] as? [[String: Any]],
                let message = choices.first?["message"] as? [String: Any],
-               let content = message["content"] as? String {
+               let c = message["content"] as? String {
+                contentString = c
+            } else if let c = extractMessageContent(from: data) {
+                // Fallback: Qwen3.5 embeds raw newlines in reasoning_content, breaking JSON
+                print("[summarizeSession] JSON parse failed, used string fallback")
+                contentString = c
+            }
+
+            if let content = contentString {
                 // Parse the JSON from the response content
                 let cleaned = content
                     .replacingOccurrences(of: "```json", with: "")
@@ -459,63 +531,77 @@ final class ChatService {
 
     // MARK: - Agent API (for MultiAgentPipeline)
 
-    /// Non-streaming LLM call — used by parallel Agents (Emotion, Memory, Action)
-    /// Retries up to 5 times on HTTP 429 (rate limit) with exponential backoff.
+    /// Non-streaming LLM call — used by parallel Agents (Emotion, Memory, Action).
+    /// Uses the lightweight model pool (isLightweight == true) to reduce TTFT.
+    /// Falls back to the full pool if no lightweight model is configured.
+    /// Each call iterates its own local pool — does NOT touch shared currentModelIndex.
     func callAgent(systemPrompt: String, userContent: String) async throws -> String {
         guard !apiKey.isEmpty else { throw AgentError.noAPIKey }
 
-        let body: [String: Any] = [
-            "model": modelId,
-            "messages": [
-                ["role": "system", "content": systemPrompt],
-                ["role": "user", "content": userContent]
-            ],
-            "stream": false
-        ]
-        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        let pool: [APIConfig.ModelConfig] = {
+            let light = APIConfig.models.filter(\.isLightweight)
+            return light.isEmpty ? APIConfig.models : light
+        }()
 
         var lastError: Error = AgentError.httpError(429)
-        for attempt in 0..<5 {
+
+        for (attempt, model) in pool.enumerated() {
             if attempt > 0 {
-                // Exponential backoff: 2s, 4s, 8s, 16s
-                let delay = UInt64(1 << attempt) * 1_000_000_000
-                print("callAgent: retrying in \(1 << attempt)s (attempt \(attempt + 1)/5)")
-                try? await Task.sleep(nanoseconds: delay)
+                print("[callAgent] 429 — waiting 3s then trying next lightweight model (attempt \(attempt + 1)/\(pool.count))")
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
             }
 
-            var request = URLRequest(url: URL(string: apiEndpoint)!)
+            print("[callAgent] Using model: \(model.displayName)")
+
+            let body: [String: Any] = [
+                "model": model.id,
+                "messages": [
+                    ["role": "system", "content": systemPrompt],
+                    ["role": "user", "content": userContent]
+                ],
+                "stream": false
+            ]
+
+            var request = URLRequest(url: URL(string: apiEndpoint)!, timeoutInterval: 25)
             request.httpMethod = "POST"
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = bodyData
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
             let (data, response) = try await URLSession.shared.data(for: request)
             let code = (response as? HTTPURLResponse)?.statusCode ?? -1
 
             if code == 429 {
-                print("callAgent: 429 rate limited, attempt \(attempt + 1)/5")
                 lastError = AgentError.httpError(429)
                 continue
             }
 
-            guard code == 200 else {
-                throw AgentError.httpError(code)
+            guard code == 200 else { throw AgentError.httpError(code) }
+
+            // Primary: standard JSON parse
+            if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let choices = obj["choices"] as? [[String: Any]],
+               let message = choices.first?["message"] as? [String: Any],
+               let content = message["content"] as? String {
+                return content
             }
 
-            guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let choices = obj["choices"] as? [[String: Any]],
-                  let message = choices.first?["message"] as? [String: Any],
-                  let content = message["content"] as? String else {
-                throw AgentError.parseError
+            // Fallback: character-level extraction for models that embed raw newlines
+            // in "reasoning_content", making the full JSON unparseable (e.g. Qwen3.5).
+            if let content = extractMessageContent(from: data) {
+                print("[callAgent] JSON parse failed, used string fallback. Model: \(model.displayName)")
+                return content
             }
 
-            return content
+            throw AgentError.parseError
         }
 
         throw lastError
     }
 
-    /// Streaming LLM call — used by Synthesis Agent
+    /// Streaming LLM call — used by Synthesis Agent.
+    /// On HTTP 429: waits 3 s then rotates to the next model.
+    /// Synthesis responses are text-only (vision already handled upstream).
     func streamAgent(
         systemPrompt: String,
         messages: [[String: Any]],
@@ -523,46 +609,100 @@ final class ChatService {
     ) async throws -> String {
         guard !apiKey.isEmpty else { throw AgentError.noAPIKey }
 
-        var request = URLRequest(url: URL(string: apiEndpoint)!)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        var apiMessages: [[String: Any]] = [
-            ["role": "system", "content": systemPrompt]
-        ]
+        var apiMessages: [[String: Any]] = [["role": "system", "content": systemPrompt]]
         apiMessages.append(contentsOf: messages)
 
-        let body: [String: Any] = [
-            "model": modelId,
-            "messages": apiMessages,
-            "stream": true
-        ]
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let maxAttempts = APIConfig.models.count
+        var lastError: Error = AgentError.httpError(429)
 
-        let (bytes, response) = try await URLSession.shared.bytes(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+        for attempt in 0..<maxAttempts {
+            if attempt > 0 {
+                print("[streamAgent] 429 — waiting 3s then rotating model (attempt \(attempt + 1)/\(maxAttempts))")
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                rotateModel(requiresVision: false)
+            }
+
+            let model = selectModel(requiresVision: false)
+            print("[streamAgent] Using model: \(model.displayName)")
+
+            var request = URLRequest(url: URL(string: apiEndpoint)!, timeoutInterval: 60)
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+            let body: [String: Any] = ["model": model.id, "messages": apiMessages, "stream": true]
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+            let (bytes, response) = try await URLSession.shared.bytes(for: request)
             let code = (response as? HTTPURLResponse)?.statusCode ?? -1
-            throw AgentError.httpError(code)
+
+            if code == 429 {
+                lastError = AgentError.httpError(429)
+                continue
+            }
+
+            guard code == 200 else { throw AgentError.httpError(code) }
+
+            var fullContent = ""
+            for try await line in bytes.lines {
+                guard line.hasPrefix("data: ") else { continue }
+                let json = String(line.dropFirst(6))
+                if json == "[DONE]" { break }
+                if let data = json.data(using: .utf8),
+                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let choices = obj["choices"] as? [[String: Any]],
+                   let delta = choices.first?["delta"] as? [String: Any],
+                   let content = delta["content"] as? String {
+                    fullContent += content
+                    onDelta(content)
+                }
+            }
+            return fullContent
         }
 
-        var fullContent = ""
-        for try await line in bytes.lines {
-            guard line.hasPrefix("data: ") else { continue }
-            let json = String(line.dropFirst(6))
-            if json == "[DONE]" { break }
+        throw lastError
+    }
 
-            if let data = json.data(using: .utf8),
-               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let choices = obj["choices"] as? [[String: Any]],
-               let delta = choices.first?["delta"] as? [String: Any],
-               let content = delta["content"] as? String {
-                fullContent += content
-                onDelta(content)
+    // MARK: - Raw Response Content Extraction (fallback for models with invalid JSON)
+
+    /// Some models (e.g. Qwen3.5) embed raw newlines inside `reasoning_content`,
+    /// which breaks JSONSerialization. This method locates the `"message"` object
+    /// and extracts the `"content"` value via character-level parsing,
+    /// bypassing the offending field entirely.
+    private func extractMessageContent(from data: Data) -> String? {
+        guard let raw = String(data: data, encoding: .utf8) else { return nil }
+
+        // Locate the start of the "message":{ block
+        guard let messageRange = raw.range(of: "\"message\":{") else { return nil }
+        let afterMessage = String(raw[messageRange.upperBound...])
+
+        // Locate "content":"  within that block
+        guard let contentRange = afterMessage.range(of: "\"content\":\"") else { return nil }
+        let afterContent = String(afterMessage[contentRange.upperBound...])
+
+        // Walk character by character, honouring JSON escape sequences
+        var result = ""
+        var escaped = false
+        for char in afterContent {
+            if escaped {
+                switch char {
+                case "n":  result.append("\n")
+                case "t":  result.append("\t")
+                case "r":  result.append("\r")
+                case "\\": result.append("\\")
+                case "\"": result.append("\"")
+                default:   result.append(char)
+                }
+                escaped = false
+            } else if char == "\\" {
+                escaped = true
+            } else if char == "\"" {
+                break
+            } else {
+                result.append(char)
             }
         }
-
-        return fullContent
+        return result.isEmpty ? nil : result
     }
 
     enum AgentError: Error, LocalizedError {

@@ -153,11 +153,18 @@ final class InsightService {
 
         guard let observation = await callLLM(systemPrompt: systemPrompt, userPrompt: userPrompt) else {
             // Build a basic observation from local data when API fails
-            let moodEmojis = entries.compactMap(\.moodEmoji).joined()
             let topTopics = Array(Set(entries.flatMap(\.topics)).prefix(3)).joined(separator: "、")
             let base = "这周你写了\(entries.count)篇日记"
             let topicPart = topTopics.isEmpty ? "" : "，聊到了\(topTopics)"
-            let moodPart = moodEmojis.isEmpty ? "" : "，心情是\(moodEmojis)"
+            let scores = entries.compactMap(\.moodScore)
+            let moodPart: String
+            if !scores.isEmpty {
+                let avg = Double(scores.reduce(0, +)) / Double(scores.count)
+                let emoji = MoodUtils.emoji(forScore: Int(avg.rounded()))
+                moodPart = "，整体心情 \(emoji)"
+            } else {
+                moodPart = ""
+            }
             return "\(base)\(topicPart)\(moodPart)。Echo会继续陪着你的！"
         }
 

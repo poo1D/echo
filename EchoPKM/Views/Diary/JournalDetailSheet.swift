@@ -122,7 +122,6 @@ struct JournalDetailSheet: View {
             }
             .sheet(isPresented: $showingEditSheet) {
                 EditEntrySheet(entry: entry) {
-                    dismiss()
                     onDelete?(entry)
                 }
             }

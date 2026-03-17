@@ -13,6 +13,8 @@ struct ReviewView: View {
     @State private var isLoadingObservation = false
     @State private var petState = PetState()
     @State private var insightService = InsightService()
+    @State private var showMoodDetail = false
+    @State private var showTopicDetail = false
 
     var body: some View {
         NavigationStack {
@@ -45,6 +47,21 @@ struct ReviewView: View {
             }
             .task(id: weekOffset) {
                 await loadPetObservation()
+            }
+            .sheet(isPresented: $showMoodDetail) {
+                MoodDetailSheet(
+                    weekEntries: weekEntries,
+                    weekLabel: weekLabel,
+                    weekStart: selectedWeekStart
+                )
+                .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showTopicDetail) {
+                TopicDetailSheet(
+                    weekEntries: weekEntries,
+                    weekLabel: weekLabel
+                )
+                .presentationDragIndicator(.visible)
             }
         }
     }
@@ -184,6 +201,17 @@ struct ReviewView: View {
                         .font(.yuanti(15, weight: .medium))
                         .foregroundStyle(Color.claudeAccent)
                 }
+
+                Button {
+                    showMoodDetail = true
+                } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color.claudeAccent)
+                        .padding(7)
+                        .background(Color.claudeAccent.opacity(0.1), in: Circle())
+                }
+                .buttonStyle(.plain)
             }
 
             if weekEntries.isEmpty {
@@ -277,6 +305,17 @@ struct ReviewView: View {
                 Text("共 \(topicFrequencies.count) 个")
                     .font(.yuantiCaption)
                     .foregroundStyle(Color.claudeWarmGray)
+
+                Button {
+                    showTopicDetail = true
+                } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color.claudeAccent)
+                        .padding(7)
+                        .background(Color.claudeAccent.opacity(0.1), in: Circle())
+                }
+                .buttonStyle(.plain)
             }
 
             let maxCount = topicFrequencies.first?.count ?? 1
@@ -362,16 +401,11 @@ struct ReviewView: View {
                 } else if let observation = petObservation {
                     HStack(alignment: .top, spacing: 12) {
                         miniPet
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("亲爱的主人：")
-                                .font(.yuanti(13, weight: .bold))
-                                .foregroundStyle(Color.claudeAccent)
-                            Text(observation)
-                                .font(.yuantiCaption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(3)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+                        Text(observation)
+                            .font(.yuantiCaption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
 
                     HStack {

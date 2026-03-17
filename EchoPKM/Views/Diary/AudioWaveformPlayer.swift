@@ -133,8 +133,8 @@ struct AudioWaveformPlayer: View {
         let url = SpeechService.audioURL(for: fileName)
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default)
-            try session.overrideOutputAudioPort(.speaker)
+            // .playback 分类默认走扬声器，overrideOutputAudioPort 仅对 .playAndRecord 有效，不能在此调用
+            try session.setCategory(.playback, mode: .default, options: [])
             try session.setActive(true)
             player = try AVAudioPlayer(contentsOf: url)
             player?.volume = 1.0

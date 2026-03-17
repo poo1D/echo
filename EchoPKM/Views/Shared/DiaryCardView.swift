@@ -68,7 +68,7 @@ struct DiaryCard: View {
                 }
             }
 
-            // 6. AI Insight (expandable on long press)
+            // 6. AI Insight (expandable on tap)
             if let insight = entry.aiInsight {
                 HStack(spacing: 6) {
                     Image(systemName: "sparkles")
@@ -78,23 +78,23 @@ struct DiaryCard: View {
                         .font(.yuantiCaption)
                         .foregroundStyle(.secondary)
                         .lineLimit(showFullInsight ? nil : 2)
+                    Spacer(minLength: 0)
+                    Image(systemName: showFullInsight ? "chevron.up" : "chevron.down")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
-                .padding(showFullInsight ? 8 : 0)
-                .background(showFullInsight ? Color.purple.opacity(0.05) : .clear)
+                .padding(8)
+                .background(Color.purple.opacity(0.05))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+                .onTapGesture {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                        showFullInsight.toggle()
+                    }
+                }
             }
         }
         .padding()
         .glassCard()
-        .scaleEffect(showFullInsight ? 1.02 : 1.0)
-        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showFullInsight)
         .padding(.horizontal)
-        .onLongPressGesture(minimumDuration: 0.5) {
-            let generator = UIImpactFeedbackGenerator(style: .medium)
-            generator.impactOccurred()
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                showFullInsight.toggle()
-            }
-        }
     }
 }

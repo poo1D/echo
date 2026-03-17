@@ -56,6 +56,14 @@ struct UserMessageData: Identifiable {
         self.timestamp = timestamp
     }
 
+    init(id: UUID, content: String, photoFileNames: [String] = [], videoFileNames: [String] = [], timestamp: Date) {
+        self.id = id
+        self.content = content
+        self.photoFileNames = photoFileNames
+        self.videoFileNames = videoFileNames
+        self.timestamp = timestamp
+    }
+
     init(from message: ChatService.Message) {
         self.id = message.id
         self.content = message.content
@@ -96,6 +104,13 @@ struct AssistantMessageData: Identifiable {
 
     init(textContent: String = "", richCards: [RichContent] = [], timestamp: Date = Date()) {
         self.id = UUID()
+        self.textContent = textContent
+        self.richCards = richCards
+        self.timestamp = timestamp
+    }
+
+    init(id: UUID, textContent: String = "", richCards: [RichContent] = [], timestamp: Date) {
+        self.id = id
         self.textContent = textContent
         self.richCards = richCards
         self.timestamp = timestamp

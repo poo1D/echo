@@ -33,6 +33,7 @@ struct ConversationView: View {
 
     var petState: PetState
     var initialMoodEmoji: String?
+    var draftService: DraftSessionService
     var dismiss: () -> Void
 
     private var hasUserMessages: Bool {
@@ -129,18 +130,18 @@ struct ConversationView: View {
                 await healthService.requestAuthorization()
                 healthSnapshot = await healthService.buildSnapshot()
             }
-            loadProactiveCards()
+            loadDraftOrGreeting()
             ragService.loadIndex()
             if ragService.indexCount == 0, !recentEntries.isEmpty {
                 ragService.rebuildIndex(entries: Array(recentEntries))
             }
         }
         .onDisappear {
-            saveIfNeeded()
+            saveDraft()
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .background || newPhase == .inactive {
-                saveIfNeeded()
+                saveDraft()
             }
         }
     }
@@ -232,6 +233,100 @@ struct ConversationView: View {
 
         // Proactive cards (schedule reminders, habit streaks, mood care…) — 仅在主页展示，对话页不显示
         // let cards = greetingService.generateFeedCards(...)
+    }
+
+    // MARK: - Draft / Restore
+
+    /// 打开对话页时：有今天草稿则恢复，有昨天草稿则先自动存为日记再开新会话，否则正常加载问候
+    private func loadDraftOrGreeting() {
+        guard !hasLoadedProactive else { return }
+        hasLoadedProactive = true
+
+        if draftService.hasDraftFromPreviousDay {
+            // 前一天有未保存草稿 → 自动存为日记后清空，开启新会话
+            Task {
+                await saveOldDraftAsDiary()
+                draftService.clear()
+                loadProactiveCards()
+            }
+        } else if draftService.hasDraftFromToday {
+            // 今天有草稿 → 恢复对话
+            restoreDraft()
+        } else {
+            // 全新会话
+            loadProactiveCards()
+        }
+    }
+
+    /// 将前一天草稿内容存入 SwiftData（自动保存，无需确认）
+    private func saveOldDraftAsDiary() async {
+        guard let draft = draftService.draft else { return }
+        chatService.messages = draftService.restoreChatMessages()
+        autoSaveService.sessionAudioFiles = draft.audioFileNames
+        autoSaveService.sessionPhotoFiles = draft.photoFileNames
+        autoSaveService.sessionVideoFiles = draft.videoFileNames
+        if let name = draft.locationName {
+            autoSaveService.sessionLocation = PendingLocation(
+                name: name,
+                latitude: draft.latitude ?? 0,
+                longitude: draft.longitude ?? 0
+            )
+        }
+        let oldFeedItems = draftService.restoreFeedItems()
+        await autoSaveService.saveFeedSession(
+            feedItems: oldFeedItems,
+            chatService: chatService,
+            modelContext: modelContext,
+            insightService: insightService,
+            scheduleHabitService: scheduleHabitService,
+            ragService: ragService,
+            minimumUserMessages: 1,
+            moodEmoji: draft.moodEmoji
+        )
+        // 重置 chatService 准备新会话
+        chatService.clear()
+        autoSaveService.sessionAudioFiles = []
+        autoSaveService.sessionPhotoFiles = []
+        autoSaveService.sessionVideoFiles = []
+        autoSaveService.sessionLocation = nil
+    }
+
+    /// 从今天的草稿恢复 feedItems 和 chatService 上下文
+    private func restoreDraft() {
+        guard let draft = draftService.draft else { return }
+        feedItems = draftService.restoreFeedItems()
+        chatService.messages = draftService.restoreChatMessages()
+        autoSaveService.sessionAudioFiles = draft.audioFileNames
+        autoSaveService.sessionPhotoFiles = draft.photoFileNames
+        autoSaveService.sessionVideoFiles = draft.videoFileNames
+        if let name = draft.locationName {
+            autoSaveService.sessionLocation = PendingLocation(
+                name: name,
+                latitude: draft.latitude ?? 0,
+                longitude: draft.longitude ?? 0
+            )
+        }
+        // 从最后一条助手消息推断心情氛围
+        if let lastAssistant = feedItems.last(where: { if case .assistantMessage = $0 { return true } else { return false } }),
+           case .assistantMessage = lastAssistant {
+            // 保持 neutral，后续发消息时会更新
+        }
+    }
+
+    /// 将当前对话保存为草稿（关闭对话页 / 进入后台时调用）
+    private func saveDraft() {
+        guard hasUserMessages else { return }
+        inactivityTimer?.invalidate()
+        draftService.save(
+            feedItems: feedItems,
+            audioFiles: autoSaveService.sessionAudioFiles,
+            photoFiles: autoSaveService.sessionPhotoFiles,
+            videoFiles: autoSaveService.sessionVideoFiles,
+            locationName: autoSaveService.sessionLocation?.name,
+            latitude: autoSaveService.sessionLocation?.latitude,
+            longitude: autoSaveService.sessionLocation?.longitude,
+            moodEmoji: initialMoodEmoji ?? draftService.draft?.moodEmoji
+        )
     }
 
     // MARK: - Send Message (Multi-Agent Pipeline)
@@ -365,6 +460,7 @@ struct ConversationView: View {
                 ragService: ragService,
                 moodEmoji: initialMoodEmoji
             )
+            draftService.clear()
         }
     }
 
@@ -382,6 +478,7 @@ struct ConversationView: View {
                 minimumUserMessages: 1,
                 moodEmoji: initialMoodEmoji
             )
+            draftService.clear()
             withAnimation {
                 showSaveConfirmation = true
             }

@@ -4,7 +4,6 @@ import SwiftUI
 
 enum PetAccessory: String, CaseIterable, Hashable {
     case umbrella       // rain / sad
-    case sunglasses     // happy / sunny
     case sweatband      // exercise / workout
     case sleepCap       // late night / tired
     case musicNote      // music related
@@ -14,7 +13,6 @@ enum PetAccessory: String, CaseIterable, Hashable {
     var icon: String {
         switch self {
         case .umbrella: return "umbrella.fill"
-        case .sunglasses: return "eyeglasses"
         case .sweatband: return "figure.run"
         case .sleepCap: return "moon.zzz.fill"
         case .musicNote: return "music.note"
@@ -26,7 +24,6 @@ enum PetAccessory: String, CaseIterable, Hashable {
     var color: Color {
         switch self {
         case .umbrella: return Color(hex: "4A90D9")
-        case .sunglasses: return .black
         case .sweatband: return .red
         case .sleepCap: return Color(hex: "7B68EE")
         case .musicNote: return Color(hex: "FF6B35")
@@ -38,7 +35,6 @@ enum PetAccessory: String, CaseIterable, Hashable {
     var offset: CGSize {
         switch self {
         case .umbrella: return CGSize(width: 25, height: -75)
-        case .sunglasses: return CGSize(width: 0, height: -28)
         case .sweatband: return CGSize(width: 0, height: -48)
         case .sleepCap: return CGSize(width: 15, height: -70)
         case .musicNote: return CGSize(width: 30, height: -70)
@@ -50,7 +46,6 @@ enum PetAccessory: String, CaseIterable, Hashable {
     var fontSize: CGFloat {
         switch self {
         case .umbrella: return 22
-        case .sunglasses: return 16
         case .sweatband: return 14
         case .sleepCap: return 20
         case .musicNote: return 18
@@ -152,11 +147,6 @@ class PetState {
         // Late night / tired
         if hour >= 22 || hour < 5 || lower.contains("困") || lower.contains("sleepy") || lower.contains("失眠") {
             newAccessories.insert(.sleepCap)
-        }
-
-        // Happy / sunny
-        if moodScore >= 4 {
-            newAccessories.insert(.sunglasses)
         }
 
         // Sad / rain

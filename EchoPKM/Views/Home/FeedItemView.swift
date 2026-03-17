@@ -547,6 +547,14 @@ private struct AssistantMessageView: View {
                         .shadow(color: echoGlowColor.opacity(0.08), radius: 16, y: 4)
                         .foregroundStyle(.primary)
                         .font(.yuantiBody)
+                } else if data.richCards.isEmpty {
+                    // Loading state — show thinking dots while pipeline is running
+                    ThinkingDotsView()
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(echoBubbleBg)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .shadow(color: echoGlowColor.opacity(0.12), radius: 8, y: 2)
                 }
             }
 

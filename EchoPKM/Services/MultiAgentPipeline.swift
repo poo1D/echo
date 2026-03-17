@@ -135,107 +135,133 @@ final class MultiAgentPipeline {
         for name in habitNames { habitCounts[name, default: 0] += 1 }
         let habitContextStr = habitCounts.map { "\($0.key): \($0.value) times this week" }.joined(separator: ", ")
 
-        // Phase 1: Dynamic Agent execution with TaskGroup
-        // Set skipped agents first
+        // Set skipped statuses for disabled agents
         if !selection.runEmotion { emotionStatus = .skipped }
-        if !selection.runMemory { memoryStatus = .skipped }
-        if !selection.runAction { actionStatus = .skipped }
-        if !selection.runHealth { healthStatus = .skipped }
+        if !selection.runMemory  { memoryStatus  = .skipped }
+        if !selection.runAction  { actionStatus  = .skipped }
+        if !selection.runHealth  { healthStatus  = .skipped }
 
-        var emotion = EmotionResult.empty
-        var memory = MemoryResult.empty
-        var action = ActionResult.empty
+        // Health status (local only, no API)
+        if selection.runHealth, let healthSnapshot {
+            healthStatus = .running
+            healthStatus = .completed("\(healthSnapshot.insights.count)条健康洞察")
+        }
 
-        // Use TaskGroup for dynamic parallel execution
-        enum AgentResult {
+        // All agents run fully concurrent — Synthesis no longer blocked by Emotion.
+        // Total latency = max(Emotion, Synthesis, Memory, Action) instead of
+        // Emotion + max(Synthesis, Memory, Action).
+        // Synthesis uses EmotionResult.empty as fallback; the LLM infers emotion
+        // from the raw user message in the system prompt context.
+        enum ConcurrentResult: Sendable {
             case emotion(EmotionResult)
             case memory(MemoryResult)
             case action(ActionResult)
+            case synthesis(String)
         }
 
-        let results = await withTaskGroup(of: AgentResult.self, returning: [AgentResult].self) { group in
+        if selection.runEmotion { emotionStatus = .running }
+        if selection.runMemory  { memoryStatus  = .running }
+        if selection.runAction  { actionStatus  = .running }
+        synthesisStatus = .running
+
+        let concurrentResults = await withTaskGroup(of: ConcurrentResult.self, returning: [ConcurrentResult].self) { group in
+            // Emotion Agent — lightweight model, concurrent with Synthesis
             if selection.runEmotion {
-                emotionStatus = .running
                 group.addTask { [self] in
                     let result = await self.runEmotionAgent(enrichedMessage, chatService: chatService)
                     return .emotion(result)
                 }
             }
 
+            // Synthesis: starts immediately with RAG context (no longer blocked by Emotion)
+            group.addTask { [self] in
+                let raw = await self.runSynthesisAgent(
+                    userMessage: enrichedMessage,
+                    photoFileNames: photoFileNames,
+                    videoFileNames: videoFileNames,
+                    emotion: .empty,
+                    memory: .empty,
+                    action: .empty,
+                    ragResults: ragResults,
+                    context: recentEntries,
+                    habits: habits,
+                    healthSnapshot: healthSnapshot,
+                    chatService: chatService,
+                    onDelta: onSynthesisDelta
+                )
+                return .synthesis(raw)
+            }
+
+            // Memory and Action run concurrently alongside Synthesis
             if selection.runMemory {
-                memoryStatus = .running
                 group.addTask { [self] in
-                    // Stagger by 1.5s to avoid 429
-                    try? await Task.sleep(nanoseconds: 1_500_000_000)
-                    let result = await self.runMemoryAgent(enrichedMessage, entrySummaries: ragEntrySummaries, chatService: chatService)
+                    let result = await self.runMemoryAgent(
+                        enrichedMessage,
+                        entrySummaries: ragEntrySummaries,
+                        chatService: chatService
+                    )
                     return .memory(result)
                 }
             }
 
             if selection.runAction {
-                actionStatus = .running
                 group.addTask { [self] in
-                    // Stagger by 3s to avoid 429
-                    try? await Task.sleep(nanoseconds: 3_000_000_000)
-                    let result = await self.runActionAgent(enrichedMessage, habitContext: habitContextStr, chatService: chatService)
+                    let result = await self.runActionAgent(
+                        enrichedMessage,
+                        habitContext: habitContextStr,
+                        chatService: chatService
+                    )
                     return .action(result)
                 }
             }
 
-            var collected: [AgentResult] = []
-            for await result in group {
-                collected.append(result)
-            }
+            var collected: [ConcurrentResult] = []
+            for await r in group { collected.append(r) }
             return collected
         }
 
-        // Unpack results
-        for result in results {
-            switch result {
-            case .emotion(let e): emotion = e
-            case .memory(let m): memory = m
-            case .action(let a): action = a
+        var emotion = EmotionResult.empty
+        var memory = MemoryResult.empty
+        var action = ActionResult.empty
+        var synthesisRaw = ""
+
+        for r in concurrentResults {
+            switch r {
+            case .emotion(let e): emotion        = e
+            case .memory(let m):  memory         = m
+            case .action(let a):  action          = a
+            case .synthesis(let s): synthesisRaw = s
             }
         }
 
-        // Health status (local only, no API)
-        if selection.runHealth, let healthSnapshot {
-            healthStatus = .running
-            let insightCount = healthSnapshot.insights.count
-            healthStatus = .completed("\(insightCount)条健康洞察")
-        }
-
-        // Phase 2: Execute actions (write to SwiftData)
+        // Phase 3: Execute extracted actions → SwiftData
         executeActions(action, modelContext: modelContext)
-
-        // Phase 3: Synthesis Agent (streaming)
-        synthesisStatus = .running
-        let synthesisRaw = await runSynthesisAgent(
-            userMessage: enrichedMessage,
-            photoFileNames: photoFileNames,
-            videoFileNames: videoFileNames,
-            emotion: emotion,
-            memory: memory,
-            action: action,
-            ragResults: ragResults,
-            context: recentEntries,
-            habits: habits,
-            healthSnapshot: healthSnapshot,
-            chatService: chatService,
-            onDelta: onSynthesisDelta
-        )
         synthesisStatus = .completed("Done")
 
         // Parse rich cards from synthesis output
         let parsed = ToolCallParser.parse(synthesisRaw)
-        let richCards = parsed.cards
+        var allCards = parsed.cards
+
+        // Prepend Memory Agent results as MemoryRecall cards (if Synthesis didn't already include them)
+        let synthesisHasMemoryCard = allCards.contains { if case .memoryRecall = $0 { return true } else { return false } }
+        if !synthesisHasMemoryCard {
+            let memoryCards: [RichContent] = memory.relevant.prefix(2).map { mem in
+                .memoryRecall(MemoryRecallData(
+                    date: mem.date,
+                    summary: mem.summary,
+                    moodEmoji: mem.moodEmoji,
+                    relevanceReason: mem.reason
+                ))
+            }
+            allCards = memoryCards + allCards
+        }
 
         return PipelineResult(
             emotion: emotion,
             memory: memory,
             action: action,
             response: parsed.cleanText,
-            richCards: richCards,
+            richCards: allCards,
             ragResults: ragResults,
             intentType: selection.intent.label
         )
